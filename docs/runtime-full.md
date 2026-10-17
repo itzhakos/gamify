@@ -41,19 +41,22 @@ WINECX_HOME=$PWD/runtimes/winecx-full . scripts/winecx-env.sh   # by hand
 | GStreamer core + base/good/bad/ugly | **1.24.2** | CrossOver tarball (monorepo subprojects) | meson, one project each, `--wrap-mode=nodownload` |
 | SDL2 | 2.32.10 | GitHub release, sha256 = the one Homebrew recorded (`5f5993c5...`) | CMake `-DCMAKE_OSX_ARCHITECTURES=x86_64` |
 | MoltenVK | **1.4.2** | `brew fetch -s molten-vk` + its `fetchDependencies` (pinned commits) | Xcode universal -> `lipo -thin x86_64` |
+| FFmpeg (avutil/avcodec/avformat/avfilter) | **6.1.6**, LGPL 2.1+ | `brew fetch -s ffmpeg@6` | own configure, `--disable-everything`, Windows Media decoders only (see below) |
+| gst-libav | 1.24.2 | CrossOver tarball (monorepo) | meson, `--wrap-mode=nodownload` |
 
 Host tools from arm64 Homebrew: meson 1.12.1, ninja, cmake (installed for this), python 3.14,
-pkg-config, bison; meson uses a cross file (`build/x86_64-full/x86_64-darwin.ini`, host
+pkg-config, bison, nasm 3.02 (FFmpeg's x86 SIMD; it emits macho64 objects); meson uses a cross file (`build/x86_64-full/x86_64-darwin.ini`, host
 x86_64-darwin, `needs_exe_wrapper = false` because Rosetta runs the test binaries).
 All dylibs get absolute install names in `runtimes/winecx-full/lib` (MoltenVK via
 `install_name_tool -id` + ad-hoc re-sign).
 
-GStreamer plugin set (37 plugins in `lib/gstreamer-1.0`, 5.8 MB) = everything CrossOver 25.1
+GStreamer plugin set (38 plugins in `lib/gstreamer-1.0`, 6.1 MB) = everything CrossOver 25.1
 ships in `lib64/gstreamer-1.0` (applemedia, asf, audioconvert, audioparsers, audioresample,
 avi, coreelements, deinterlace, id3demux, isomp4, opengl, playback, typefindfunctions,
 videoconvertscale, videofilter, videoparsersbad, wavparse) plus app, apetag, audiorate,
 audiotestsrc, autodetect, coretracers, flv, gio, matroska, mpegtsdemux, ogg, osxaudio, pbtypes,
-rawparse, subparse, theora, videorate, videotestsrc, volume, vorbis. `applemedia` gives
+rawparse, subparse, theora, videorate, videotestsrc, volume, vorbis, and **libav** (gst-libav, added
+2026-10-17 for WMV/WMA, see "Windows Media decoders" below). `applemedia` gives
 `vtdec`/`vtdec_hw` (VideoToolbox H.264/HEVC) and `atdec` (AudioToolbox AAC/MP3); it needs
 gst-plugins-base's GL lib (`-Dgl=enabled -Dgl_api=opengl -Dgl_platform=cgl -Dgl_winsys=cocoa`).
 Tools `gst-inspect-1.0` / `gst-launch-1.0` are installed in `bin/`.
@@ -77,6 +80,32 @@ Tools `gst-inspect-1.0` / `gst-launch-1.0` are installed in `bin/`.
   download of real SDL2 2.32.10.
 - libvorbis: drop `-force_cpusubtype_ALL` from configure (same as Homebrew).
 
+### Windows Media decoders: FFmpeg + gst-libav (2026-10-17)
+Games with `.wmv` intro videos (Worms W.M.D: WMV3 video + WMA Pro audio) stayed black: our
+GStreamer has `asfdemux` but no decoder for WMV/VC-1/WMA, and CrossOver 25.1 ships none either
+(winegstreamer logged `Missing decoder: Windows Media Video 9 (video/x-wmv, wmvversion=3, WMV3)`).
+Section 6 of `scripts/build-winecx-full-deps.sh` adds:
+- **FFmpeg 6.1.6** (the series GStreamer 1.24 pins in `subprojects/FFmpeg.wrap`), configured
+  with `--disable-everything --disable-autodetect` and only the decoders
+  `wmv1 wmv2 wmv3 wmv3image vc1 vc1image msmpeg4v1/v2/v3 wmav1 wmav2 wmapro wmavoice wmalossless`
+  + the `vc1` parser; no programs, avdevice, swscale, swresample, postproc or network. No
+  `--enable-gpl`/`--enable-nonfree`; the script aborts unless configure reports
+  `License: LGPL version 2.1 or later`. Links only libSystem + CoreFoundation/CoreVideo/CoreMedia.
+  libavcodec 2.2 MB, avutil 0.8 MB, avformat 0.2 MB, avfilter 0.1 MB.
+- **gst-libav 1.24.2** (`lib/gstreamer-1.0/libgstlibav.dylib`, 0.3 MB, plugin license LGPL):
+  `avdec_wmv1/2/3`, `avdec_vc1`, `avdec_wmav1/2`, `avdec_wmapro`, `avdec_wmavoice`,
+  `avdec_wmalossless`, `avdec_msmpeg4*` (+ `avdec_h263`, pulled in by msmpeg4).
+- winegstreamer builds `decodebin` pipelines for quartz (DirectShow), mfplat (Media Foundation),
+  wmvcore and the WMV/WMA DMOs, so the new decoders are used without any Wine change.
+- **winedmo (Wine `--with-ffmpeg`) is no alternative in Wine 10.0**: `dlls/winedmo` is only a
+  demuxer (libavformat) behind `mfsrcsnk`'s byte stream handlers, and even those default to the
+  GStreamer handler (`use_gst_byte_stream_handler()`, opt-out
+  `HKCU\Software\Wine\MediaFoundation\DisableGstByteStreamHandler`). Every decoder is still a
+  winegstreamer `wg_transform`, i.e. GStreamer. Note: since libav*.pc are now in the prefix, a
+  Wine reconfigure of winecx-full will detect FFmpeg and build `winedmo.so` against our libs;
+  harmless (no demuxers are built, `winedmo_demuxer_check` fails, GStreamer is used anyway).
+- Build time: FFmpeg 16 s, gst-libav 3 s.
+
 ## Wine configure (from scripts/build-winecx-full.sh)
 Identical to `scripts/build-winecx.sh` except prefix/build dir and
 `--with-gstreamer --with-sdl --with-vulkan` instead of the three `--without-*` (the script
@@ -89,7 +118,8 @@ Same post-install steps (`bin/wineloader -> wine`, d3d10*/d3d11/d3d12/dxgi moved
 ## Sizes
 - `runtimes/winecx-full`: 1.5 GB (winecx: 1.4 GB). 114 dylibs in `lib/`, 31 unix `.so`
   (winecx: 30, the extra one is `winegstreamer.so`), 983 x86_64 + 1049 i386 PE files
-  (+ `winegstreamer.dll`). MoltenVK 5.4 MB, SDL2 1.7 MB, gio 2.0 MB, glib 1.4 MB, plugins 5.8 MB.
+  (+ `winegstreamer.dll`). MoltenVK 5.4 MB, SDL2 1.7 MB, gio 2.0 MB, glib 1.4 MB, plugins 5.8 MB
+  (6.1 MB with gst-libav), FFmpeg libs 3.3 MB (2026-10-17).
 - `build/x86_64-full`: 3.8 GB (wine 3.1 GB, MoltenVK tree 479 MB).
 
 ## Build times (M4 Max, `make -j16` / ninja)
@@ -124,9 +154,15 @@ gstreamer core 10 s, base 12 s, good 6 s, bad 11 s, ugly 4 s, SDL2 22 s, MoltenV
   - `src/mftest/dshowtest.exe` (DirectShow / quartz: RenderFile, Run, WaitForCompletion):
     5 s clip EC_COMPLETE after 5.33 s, 15 s clip after 15.35 s (real-time playback); VMR7
     "ActiveMovie Window" created and shown by winemac.drv (trace), same GStreamer elements.
-  - WMV (wmv2 + wmav2): asfdemux runs but there is no decoder ->
-    `MFCreateSourceReaderFromURL` 0xC00D36BB. Expected: no gst-libav/FFmpeg, and CrossOver's
-    plugin set has none either (WMV/WMA needs `gst-libav`, which means building FFmpeg x86_64).
+  - WMV (before 2026-10-17): asfdemux ran but there was no decoder ->
+    `MFCreateSourceReaderFromURL` 0xC00D36BB. With FFmpeg + gst-libav (above), Worms W.M.D's
+    `uidata/video/Team17Logo.wmv` (WMV3 1920x1080 25 fps + WMA Pro 44.1 kHz stereo):
+    - native: `bin/gst-launch-1.0 filesrc ... ! decodebin ...` -> `asfdemux`, `avdec_wmv3`,
+      `avdec_wmapro`, 89 I420 frames to EOS at 3.52 s;
+    - `mftest.exe` (bottle steamtest): 89 video frames to NV12 (last 3.52 s), 77 audio samples
+      to PCM;
+    - `dshowtest.exe`: RenderFile OK, duration 4.02 s, EC_COMPLETE after 3.89 s wall (real time);
+    - the game itself started from Steam: see docs/worms-opengl.md section 4.
   - Wine 10's `wmplayer.exe` is a 33-line stub and there is no mplay32, hence the test exes.
   - `WINEDEBUG=+winegstreamer` prints nothing useful in Wine 10 (the unix side logs to other
     channels); `GST_DEBUG=GST_ELEMENT_FACTORY:4` is the way to see the pipeline.
@@ -151,6 +187,8 @@ gstreamer core 10 s, base 12 s, good 6 s, bad 11 s, ugly 4 s, SDL2 22 s, MoltenV
 
 ## Open items
 - `cli/` support for runtime `winecx-full` (see above).
-- WMV/WMA and other codecs need gst-libav + FFmpeg (x86_64); CrossOver doesn't ship it either.
+- FFmpeg has only the Windows Media decoders enabled; add others to `WM_DECODERS` (LGPL ones
+  only) when a game needs them.
+- `runtimes/winecx` (non-full) has no GStreamer at all, so WMV only plays on winecx-full.
 - CodeWeavers' MoltenVK (transform feedback etc.) needs their non-public SPIRV-Cross fork.
 - DXVK / DXMT on top of MoltenVK: not tried yet.

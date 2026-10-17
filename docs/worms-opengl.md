@@ -7,13 +7,13 @@ window, OpenGL) dies at startup with
 `movb (%esi),%al` with ESI=0).
 
 There were four problems in a row; each one hid the next. The first three are in Wine's Mac
-driver and are fixed by `src/patches/winemac-qt5-opengl.patch`. The fourth (WMV video) is a
-runtime feature that is still missing, see "Still open".
+driver and are fixed by `src/patches/winemac-qt5-opengl.patch`. The fourth (WMV video) was a
+missing runtime feature, fixed on 2026-10-17 with FFmpeg + gst-libav in winecx-full (section 4).
 
 ![Main menu](screenshots/worms-menu.png)
 
 (Main menu, rendered by the patched winemac.so; read back from the GL back buffer while the
-screen was locked, intro videos re-encoded as described under "Still open".)
+screen was locked, intro videos re-encoded as described in section 4, before the WMV decoders existed.)
 
 ## 1. SetPixelFormat on a message-only window (the crash)
 
@@ -96,10 +96,10 @@ slots) and calls `glBindAttribLocation` before the real link. It stays out of th
 app binds locations itself (hooked `glBindAttribLocation`) or the shader uses
 `layout(location)`. After that: legal screen with the Razer Chroma logo, then black again.
 
-## 4. Intro videos (still open)
+## 4. Intro videos (fixed 2026-10-17: FFmpeg + gst-libav)
 
-`uidata/video/*.wmv` are WMV3 video + WMA Pro audio. Our GStreamer has an ASF demuxer but no
-decoder for either (no gst-libav/FFmpeg; CrossOver 25.1 does not ship one either):
+`uidata/video/*.wmv` are WMV3 video + WMA Pro audio (`WMDLogo.wmv`: WMA 2). GStreamer had an
+ASF demuxer but no decoder for either (no gst-libav/FFmpeg; CrossOver 25.1 does not ship one):
 
 ```
 Missing decoder: Windows Media Video 9 (video/x-wmv, wmvversion=(int)3, format=(string)WMV3 ...)
@@ -110,16 +110,34 @@ XMovie | Failed to render file uidata/video/WMDLogo.wmv
 After a failed intro video the frontend stays faded to black. The last draw of every frame is
 a full-screen colour quad over the post-processing chain, and the game logs in to Team17's
 server and loads the news behind it. A missing file behaves the same as an undecodable one,
-and `/NOMOVIES` and `/NOTITLESCREEN` (both in the exe) change nothing. **Proof:** with the
-four logo videos re-encoded to H.264/AAC in MP4 under the same `.wmv` names
-(`ffmpeg -i X.wmv -c:v libx264 -pix_fmt yuv420p -c:a aac -f mp4 X.wmv`), winegstreamer plays
-them (VideoToolbox), and the game continues to the main menu (screenshot above). The originals
-were restored afterwards (checksums match).
+and `/NOMOVIES` and `/NOTITLESCREEN` (both in the exe) change nothing. With the four logo videos
+re-encoded to H.264/AAC in MP4 under the same `.wmv` names the game reached the main menu,
+which showed that decoding was the last blocker.
 
-The real fix is WMV decoding in the runtime: FFmpeg (LGPL build, decoders `wmv1/2/3`, `vc1`,
-`wmav1/2`, `wmapro`) plus gst-libav 1.24.x in `runtimes/winecx-full`, or Wine's FFmpeg-based
-winedmo (`--with-ffmpeg`). That's a separate task; until then Worms W.M.D (and other games with
-WMV intros) gets stuck after the logos.
+**Fix:** `runtimes/winecx-full` now has a minimal LGPL FFmpeg 6.1.6 (Windows Media decoders
+only) and gst-libav 1.24.2, built by section 6 of `scripts/build-winecx-full-deps.sh`; details,
+LGPL notes and why Wine's own winedmo/`--with-ffmpeg` path doesn't help are in
+docs/runtime-full.md ("Windows Media decoders"). winegstreamer's decodebin picks
+`avdec_wmv3` + `avdec_wmapro` (`avdec_wmav2` for WMDLogo) by itself; no Wine change.
+
+Verified in bottle `steamtest` with the **original** `.wmv` files (md5 of Team17Logo.wmv
+`89444cdc...`, WMDLogo.wmv `ab347301...`):
+- `dshowtest.exe Team17Logo.wmv`: EC_COMPLETE after 3.89 s (clip 4.02 s), `mftest.exe`: 89
+  frames to NV12, 77 audio samples to PCM; `gst-launch-1.0` natively: 89 frames to EOS.
+- **Worms W.M.D started from Steam** (`steam://rungameid/327030`; Steam logged
+  `LaunchApp ... Completed`, game process tracked, overlay attached): the Team17 logo video plays
+  (frame below, captured 16 s after launch), then the save warning and the WMD logo (both
+  movies created, `XMovie | ConstructShape` at 11.8 s and 21.1 s, no "Failed to render file"),
+  then Team17 login, news feed and the **main menu** (captured 37 s after launch).
+
+![Team17 logo video](screenshots/worms-team17-wmv.png)
+
+![Main menu after the original intro videos](screenshots/worms-menu-wmv.jpg)
+
+Note while testing: this Steam had stopped handling launch requests at all (Play button,
+`steam://`, `-applaunch` and even `-shutdown` were ignored after ~17:11; the library page showed
+"Cloud status: Downloading… (100%)"). `wineserver -k` in the bottle and `cross steam steamtest`
+fixed it; the launch above is from the restarted Steam.
 
 ## Options and defaults
 
@@ -151,8 +169,10 @@ the process. Fix 1 only turns a hard failure into success.
   `WINECX_BUILD=$PWD/build/winemac-msgwin scripts/build-winecx-full.sh configure` then
   `make -C build/winemac-msgwin/wine dlls/winemac.drv/winemac.so`. winecx (no Vulkan) needs
   its own configured tree, because winemac's vulkan.c differs.
-- runtimes/ was not modified here: the SSE rebuild (session "Rebuild the 32-bit side") was
-  swapping runtimes at the time. Its winecx-full build started at 17:38 compiled winemac after
+- runtimes/ was not modified by the original fix: the SSE rebuild (session "Rebuild the 32-bit side") was
+  swapping runtimes at the time. On 2026-10-17 (WMV session) the patched `winemac.so` from
+  `build/winemac-msgwin` was copied into `runtimes/winecx-full/lib/wine/x86_64-unix/` so the game
+  can be started from Steam there (original kept in that session's scratchpad). Its winecx-full build started at 17:38 compiled winemac after
   the patch was final, so runtimes built from now on contain the fix. Tested with an APFS clone
   of winecx-full plus the patched winemac.so (scratchpad), against the running steamtest
   wineserver (same protocol).

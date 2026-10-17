@@ -6,6 +6,7 @@
 #                                    (winegstreamer: video playback, mfplat, quartz)
 #   SDL2                          -> winebus joystick backend
 #   MoltenVK                      -> winevulkan (Vulkan for DXVK/DXMT later)
+#   FFmpeg (LGPL, WMV/WMA only)   -> gst-libav: Windows Media decoders for winegstreamer
 # with the arm64 host clang generating x86_64 code (-arch x86_64). Homebrew no
 # longer publishes x86_64 bottles for macOS 27 and /usr/local needs sudo, so an
 # x86_64 Homebrew is not an option on this machine. meson/ninja/cmake/python from
@@ -351,12 +352,56 @@ if [ ! -f "$PREFIX/lib/libMoltenVK.dylib" ]; then
   done_step
 fi
 
+# ======================================================================
+# 6. Windows Media decoders: minimal LGPL FFmpeg 6.1 + gst-libav 1.24.2.
+# GStreamer has asfdemux but no WMV/VC-1/WMA decoder, and CrossOver 25.1 ships
+# none, so games with .wmv intro videos (Worms W.M.D: WMV3 + WMA Pro) stayed
+# black. winegstreamer (quartz, mfplat, wmvcore and the WMV/WMA DMOs) builds
+# decodebin pipelines, so avdec_wmv3/avdec_wmapro are picked up automatically.
+# Wine's own FFmpeg path (winedmo, --with-ffmpeg) is no alternative in 10.0:
+# it is only a demuxer for mfsrcsnk; decoding still goes through GStreamer.
+# FFmpeg 6.1 = the series GStreamer 1.24 pins in subprojects/FFmpeg.wrap;
+# tarball from `brew fetch -s ffmpeg@6` (sha256-checked by Homebrew).
+# --disable-everything + an explicit decoder list keeps it small; no --enable-gpl
+# / --enable-nonfree, so the result is LGPL 2.1+. --disable-autodetect stops it
+# from linking anything else (VideoToolbox, zlib, iconv, SecureTransport...).
+# x86 SIMD needs nasm (arm64 Homebrew host tool, emits macho64 objects).
+# ======================================================================
+if [ ! -f "$PREFIX/lib/libavcodec.60.dylib" ]; then
+  command -v nasm > /dev/null || { echo "nasm missing: brew install nasm"; exit 1; }
+  FFMPEG_SRC="$(unpack ffmpeg "$(brew_src ffmpeg@6)")"
+  step ffmpeg "($FFMPEG_SRC)"
+  WM_DECODERS=wmv1,wmv2,wmv3,wmv3image,vc1,vc1image,msmpeg4v1,msmpeg4v2,msmpeg4v3,wmav1,wmav2,wmapro,wmavoice,wmalossless
+  # FFmpeg's configure is not autoconf (no --host), so no autotools helper here.
+  mkdir -p "$BUILD/ffmpeg" && cd "$BUILD/ffmpeg"
+  "$FFMPEG_SRC/configure" --prefix="$PREFIX" --install-name-dir="$PREFIX/lib" \
+      --cc="$CC" --cxx="$CXX" --arch=x86_64 --target-os=darwin --enable-cross-compile \
+      --x86asmexe=nasm --disable-static --enable-shared \
+      --disable-everything --disable-autodetect --disable-programs --disable-doc \
+      --disable-avdevice --disable-swresample --disable-swscale --disable-postproc --disable-network \
+      --enable-decoder=$WM_DECODERS --enable-parser=vc1 > configure.log 2>&1 \
+    || { tail -30 configure.log; exit 1; }
+  grep -q '^License: LGPL' configure.log || { grep '^License' configure.log; echo "FFmpeg must be LGPL"; exit 1; }
+  make -j"$JOBS" > make.log 2>&1 || { tail -30 make.log; exit 1; }
+  make install > install.log 2>&1
+  done_step
+fi
+
+if [ ! -f "$PREFIX/lib/gstreamer-1.0/libgstlibav.dylib" ]; then
+  step gst-libav
+  # gst-libav only knows doc/tests/package-* (no nls or glib-checks options)
+  mesonbuild gst-libav "$GST/gst-libav" --wrap-mode=nodownload -Ddoc=disabled -Dtests=disabled \
+      -Dpackage-origin="Cross winecx-full"
+  done_step
+fi
+
 step done
 cd "$PREFIX/lib"
 for f in libgmp.10.dylib libnettle.dylib libhogweed.dylib libgnutls.30.dylib libfreetype.6.dylib \
          libffi.8.dylib libpcre2-8.0.dylib libglib-2.0.0.dylib libgobject-2.0.0.dylib \
          libgmodule-2.0.0.dylib libgio-2.0.0.dylib libgstreamer-1.0.0.dylib libgstvideo-1.0.0.dylib \
-         libgstgl-1.0.0.dylib libSDL2-2.0.0.dylib libMoltenVK.dylib; do
+         libgstgl-1.0.0.dylib libSDL2-2.0.0.dylib libMoltenVK.dylib \
+         libavutil.58.dylib libavcodec.60.dylib libavformat.60.dylib libavfilter.9.dylib; do
   echo "$f: $(file -b "$f")"
 done
 echo "gstreamer plugins: $(ls gstreamer-1.0/*.dylib | wc -l | tr -d ' ') ($(file -b gstreamer-1.0/*.dylib | sort -u | tr '\n' ' '))"

@@ -18,6 +18,7 @@ in the original before a release.
 | gnutls 3.8.13 (libgnutls, with included libtasn1 and libunistring) | LGPL-2.1+ (library) | Yes, with source | Yes, with source | same |
 | FreeType 2.15.0 | FTL or GPL-2.0 (dual) | Yes | Yes | Use under FTL: credit line in docs/about box |
 | GStreamer 1.24.2 (not built yet) | LGPL-2.1+ core; plugins vary | Yes, with source | Yes, with source | Ship only LGPL plugins; **unclear**: codec patents |
+| FFmpeg 6.1.6 (libavutil/avcodec/avformat/avfilter, winecx-full only) + gst-libav 1.24.2 | LGPL-2.1+ (built without `--enable-gpl`/`--enable-nonfree`; the build script aborts otherwise) | Yes, with source | Yes, with source | Ship as separate dylibs, publish the FFmpeg tarball + configure line (scripts/build-winecx-full-deps.sh section 6); **unclear**: WMV/WMA patents, same question as H.264/AAC |
 | SDL2 (not built yet) | zlib | Yes | Yes | Notice |
 | MoltenVK (not built yet) | Apache-2.0 | Yes | Yes | LICENSE in notices |
 | DXVK / vkd3d-proton / DXMT (if added) | zlib / LGPL-2.1 / MIT | Yes | Yes | Notices (+ source for LGPL) |
@@ -101,6 +102,13 @@ the Wine executables, or document how to re-sign).
   parts. Plan: ship only LGPL plugins, list each in notices, publish source like Wine.
   **Unclear:** patent licensing for H.264/AAC decoders; Wine itself only needs them for
   mfplat/winegstreamer video playback. Decide when we build it.
+- **FFmpeg + gst-libav** (added 2026-10-17 to winecx-full for WMV/WMA intro videos): FFmpeg
+  6.1.6 from `brew fetch -s ffmpeg@6` (`upstream/ffmpeg-src/ffmpeg-6.1.6`, `COPYING.LGPLv2.1`,
+  `LICENSE.md`), configured `--disable-everything` with only Windows Media decoders and no GPL
+  or nonfree parts (configure prints `License: LGPL version 2.1 or later`; the script checks
+  it). gst-libav (`sources/gstreamer/subprojects/gst-libav`, `COPYING` = LGPL 2.1) is LGPL.
+  Obligations as for the other LGPL dylibs: separate replaceable dylibs, license text, exact
+  source + configure flags published with each release.
 - **SDL2**: zlib license (CrossOver's license.txt Appendix A lists SDL under zlib). There is no
   SDL source in the CrossOver tarball; we would fetch it from libsdl.org. zlib requires no
   notice in binaries, add one anyway.
