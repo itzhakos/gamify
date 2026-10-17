@@ -4,7 +4,8 @@
 # point, which Rosetta emulates slowly. Wine's DirectSound resampler (any game buffer whose
 # rate differs from the Mac device, e.g. 44.1 kHz on a 48 kHz device) then eats a whole core
 # and audio ticks. See docs/portal2-audio.md. Stopgap until the runtimes are rebuilt with
-# i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse" (then this script is not needed).
+# i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse". Done on 2026-10-17: runtimes built since then
+# have SSE i386 DLLs, so this script is only for the old x87 runtimes (runtimes/*-x87).
 #
 #   scripts/dsound-sse.sh build            configure a minimal Wine tree + make dsound (~30 s)
 #   scripts/dsound-sse.sh install <bottle> copy into bottles/<bottle>/drive_c/windows/syswow64

@@ -115,6 +115,72 @@ aborts if configure prints "GStreamer/SDL2/Vulkan won't be supported"). Result i
 Same post-install steps (`bin/wineloader -> wine`, d3d10*/d3d11/d3d12/dxgi moved to
 `lib/wined3d/x86_64-windows`, generated `distversion.h`).
 
+## i386 PE side built with SSE float math (both runtimes, 2026-10-17)
+Both `scripts/build-winecx.sh` and `scripts/build-winecx-full.sh` now pass
+`i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse"`. Before, the i386 DLLs used mingw gcc's default
+(`-g -O2` = x87 float math), which Rosetta 2 emulates slowly; the 32-bit DirectSound mixer
+alone ate a core in Portal 2 (docs/portal2-audio.md). x86_64 is SSE by ABI and stays default
+(`x86_64_CFLAGS` unset). No `i386_LDFLAGS` or per-DLL flags are needed: Wine links its PE DLLs
+without the mingw CRT, and its i386 flags already include `-mpreferred-stack-boundary=2`, so gcc
+realigns the stack itself where SSE needs 16 bytes.
+
+The scripts also apply `src/patches/*.patch` to the CrossOver tree before configure (idempotent:
+a patch that already reverses cleanly is skipped), so our own fixes, currently
+`winemac-qt5-opengl.patch` (docs/worms-opengl.md), are part of every build.
+`src/patches/crossover-25.1.0-over-wine-10.0.diff` is reference only and never applied.
+`WINECX_PREFIX` / `WINECX_BUILD` build a second copy next to the live runtime; the prefix must
+already hold the deps (clone the live runtime with `cp -Rc`; the deps' install names then
+point to the final location).
+
+x87 / scalar-SSE instruction counts (objdump mnemonics; the residual x87 is the i386 ABI's
+float return in st(0), `long double` and musl's x87 asm in the CRTs):
+
+| i386 DLL | x87 build: x87 / SSE | SSE build: x87 / SSE | CrossOver 25.1: x87 / SSE |
+|---|---|---|---|
+| dsound.dll | 1761 / 0 | 61 / 1417 | 54 / 1438 |
+| wined3d.dll | 6707 / 0 | 134 / 4152 | 47 / 3579 |
+| ucrtbase.dll | 7051 / 1 | 750 / 5400 | 697 / 5375 |
+| msvcrt.dll | 3745 / 1 | 396 / 2767 | 391 / 2788 |
+| ntdll.dll | 1224 / 0 | 99 / 897 | 95 / 902 |
+| xaudio2_7.dll | 1581 / 0 | 92 / 1498 | 76 / 1551 |
+| user32.dll / gdi32.dll | 785 / 677 x87 | 78 / 2 x87 | 20 / 2 x87 |
+| x86_64 dsound / wined3d | 0 / 989, 0 / 3223 | identical | — |
+
+CrossOver's i386 DLLs (GCC 13.2) also use SSE3/SSSE3 (`fisttpll`, `movddup`, `pshufb`
+across many DLLs, no SSE4.1), i.e. something like `-march=core2`. The remaining gap (e.g. 13
+`fnstcw/fldcw` + `fistpll` pairs in wined3d for float->int64) would close with `-msse3`
+(`fisttp`); not done, the SSE2 build is the one the user tested.
+
+`src/dsbench` (32-bit DirectSound, 10 s, process CPU; scratch prefixes, same machine, 18:15):
+
+| case | x87 runtime | SSE runtime | hand-built SSE dsound (`scripts/dsound-sse.sh`) |
+|---|---|---|---|
+| 1 buffer @ 44100 Hz (resampled) | 53.5% | 5.5–5.8% | 5.8–6.0% |
+| 4 buffers @ 44100 Hz | 100.4% (saturated) | 16.5% | 16.6% |
+| 1 buffer @ 48000 Hz (no resampling) | 4.3% | 2.2% | — |
+
+(Same in winecx: 54.9% -> 5.8%. Absolute numbers are higher than the 1.5% in
+docs/portal2-audio.md, measured under different load; the runtime build and the hand-built DLL
+are identical in every case.) In bottle `steamtest` after the swap: 4.0%.
+
+Build: both trees built from scratch into `runtimes/winecx-sse` / `winecx-full-sse`
+(`build/x86_64-sse`, `build/x86_64-full-sse`). winecx: make 92 min 53 s + install 6 min 48 s
+under `taskpolicy -b` (E-cores + throttled I/O, so a running Portal 2 test was not disturbed;
+not recommended otherwise). winecx-full: configure 81 s, make ~30 min under `taskpolicy -b`,
+then resumed at normal priority: 2 min 35 s, install 1 min 24 s. At normal priority a full
+build is the ~3.5 min above.
+
+Swap (2026-10-17, runtimes idle, Steam in steamtest shut down with the user's OK):
+`rsync -a --ignore-existing <old>/ <new>/` first (carries files added to the live runtime after
+the clone: FFmpeg + gst-libav in winecx-full), then `winecx -> winecx-x87`,
+`winecx-sse -> winecx`, same for `-full`. No path of the build prefix is embedded in the
+installed tree (`grep -rl winecx-sse` empty; unix .so use `@rpath`). Checked: `cross cmd
+steamtest /c ver` and a fresh winecx bottle: Windows 10.0.19043. Bottle steamtest: the
+hand-installed `syswow64/dsound.dll`, its `.wine-x87.bak` and `DllOverrides "dsound"` removed,
+`wineboot --update` reinstalled the runtime's DLL (byte-identical to
+`lib/wine/i386-windows/dsound.dll`, 61 x87 ops). `runtimes/winecx-x87`, `winecx-full-x87` stay
+until the user confirms Portal 2 audio and Worms on the new runtime.
+
 ## Sizes
 - `runtimes/winecx-full`: 1.5 GB (winecx: 1.4 GB). 114 dylibs in `lib/`, 31 unix `.so`
   (winecx: 30, the extra one is `winegstreamer.so`), 983 x86_64 + 1049 i386 PE files

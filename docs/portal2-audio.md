@@ -95,6 +95,12 @@ that a matching sample rate also avoids it (but games pick their own rates, typi
   silently brings back the x87 DLL: check for it first if the ticks return. (The mouse-stutter
   session may set it temporarily for its A/B runs and has said it will remove it afterwards.)
 
+## Status (2026-10-17, later): fixed in the runtimes
+Both runtimes are now built with `i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse"` (docs/runtime-full.md,
+"i386 PE side built with SSE"). Bottle steamtest no longer has the hand-installed DLL or the
+`DllOverrides` value; it uses the runtime's SSE dsound.dll. `scripts/dsound-sse.sh` is only
+needed for the old x87 runtimes.
+
 ## What Gamify should do for every game
 - **Runtime (all games, the real fix)**: build the i386 PE side with SSE, i.e. add
   `i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse"` to `CONFIGURE_FLAGS` in `scripts/build-winecx.sh`
