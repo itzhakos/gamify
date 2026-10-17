@@ -1,0 +1,441 @@
+winemac-qt5-opengl.patch - Gamify patch over CrossOver 25.1.0 Wine (dlls/winemac.drv), LGPL-2.1-or-later.
+Found with Worms W.M.D (Steam 327030, 32-bit Qt5 + OpenGL); details in docs/worms-opengl.md.
+ 1. OpenGL on message-only windows: set_pixel_format() creates Mac data (a Cocoa window that is
+    never shown) for a window whose parent is HWND_MESSAGE (Qt 5's "QtOpenGLDummyWindow",
+    QOffscreenSurface). Before, SetPixelFormat failed ("DC for window of other process").
+ 2. Mac Driver option ForceOpenGLCoreContext: a legacy (< 3.0) context request gets the newest core
+    profile (4.1) plus a default VAO that stands in for VAO 0. macOS has no compatibility profile
+    above 2.1; Windows drivers return 4.x compatibility, which games with GLSL 330 rely on.
+ 3. Mac Driver option OpenGLAttribDeclarationOrder: before glLinkProgram, bind the vertex shader's
+    inputs in declaration order (Windows driver behaviour; Apple sorts them by name).
+ 2 and 3 are off by default, on for "Worms W.M.D.exe"; HKCU\Software\Wine[\AppDefaults\<exe>]\Mac Driver
+ overrides them ("y"/"n").
+Apply: patch -p1 -d upstream/crossover-sources-25.1.0/sources/wine < src/patches/winemac-qt5-opengl.patch
+
+--- a/dlls/winemac.drv/macdrv.h
++++ b/dlls/winemac.drv/macdrv.h
+@@ -46,6 +46,10 @@
+ 
+ /* CrossOver Hack 14364 */
+ extern BOOL force_backing_store;
++
++/* Gamify: ForceOpenGLCoreContext, OpenGLAttribDeclarationOrder */
++extern BOOL force_gl_core_context;
++extern BOOL gl_attrib_declaration_order;
+ 
+ extern UINT64 app_icon_callback;
+ extern UINT64 app_quit_request_callback;
+@@ -199,9 +203,11 @@
+     unsigned int        per_pixel_alpha : 1;    /* is window using per-pixel alpha? */
+     unsigned int        minimized : 1;          /* is window minimized? */
+     unsigned int        swap_interval : 1;      /* GL swap interval for window */
++    unsigned int        message_only : 1;       /* Gamify: message-only window given data for GL, never shown */
+ };
+ 
+ extern struct macdrv_win_data *get_win_data(HWND hwnd);
++extern struct macdrv_win_data *macdrv_create_message_window_data(HWND hwnd);
+ extern void release_win_data(struct macdrv_win_data *data);
+ extern void init_win_context(void);
+ extern macdrv_window macdrv_get_cocoa_window(HWND hwnd, BOOL require_on_screen);
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -65,6 +65,12 @@
+ /* CrossOver Hack 14364 */
+ BOOL force_backing_store = FALSE;
+ 
++/* Gamify: answer legacy (< 3.0) GL context requests with a core context */
++BOOL force_gl_core_context = FALSE;
++
++/* Gamify: give vertex shader inputs locations in declaration order, like Windows drivers */
++BOOL gl_attrib_declaration_order = FALSE;
++
+ UINT64 app_icon_callback = 0;
+ UINT64 app_quit_request_callback = 0;
+ UINT64 regcreateopenkeyexa_callback = 0;
+@@ -302,6 +308,14 @@
+     if ((p = wcsrchr(appname, '\\'))) appname = p + 1;
+     len = lstrlenW(appname);
+ 
++    /* Gamify: built-in defaults for games known to need the OpenGL options below; the
++       registry keys still override them. */
++    {
++        static const WCHAR worms_wmdW[] = {'W','o','r','m','s',' ','W','.','M','.','D','.','e','x','e',0};
++        if (!wcsicmp(appname, worms_wmdW))
++            force_gl_core_context = gl_attrib_declaration_order = TRUE;
++    }
++
+     if (len && len < MAX_PATH)
+     {
+         HKEY tmpkey;
+@@ -407,6 +421,15 @@
+     if (!get_config_key(hkey, appkey, "ForceOpenGLBackingStore", buffer, sizeof(buffer)))
+         force_backing_store = IS_OPTION_TRUE(buffer[0]);
+ 
++    /* Gamify: for games that ask for a default (legacy) context but need GL 3.3
++       (e.g. GLSL 330); macOS only has 2.1 legacy or 3.2+/4.1 core profiles. */
++    if (!get_config_key(hkey, appkey, "ForceOpenGLCoreContext", buffer, sizeof(buffer)))
++        force_gl_core_context = IS_OPTION_TRUE(buffer[0]);
++
++    /* Gamify: for games that assume vertex input locations in declaration order. */
++    if (!get_config_key(hkey, appkey, "OpenGLAttribDeclarationOrder", buffer, sizeof(buffer)))
++        gl_attrib_declaration_order = IS_OPTION_TRUE(buffer[0]);
++
+     if (appkey) NtClose(appkey);
+     if (hkey) NtClose(hkey);
+ }
+--- a/dlls/winemac.drv/opengl.c
++++ b/dlls/winemac.drv/opengl.c
+@@ -78,8 +78,14 @@
+     LONG                    view_moved;
+     unsigned int            last_flush_time;
+     UINT                    major;
++    BOOL                    forced_core;        /* Gamify: ForceOpenGLCoreContext promoted this context */
++    GLuint                  default_vao;        /* Gamify: stands in for VAO 0, which core profiles lack */
+ };
+ 
++/* Gamify: ForceOpenGLCoreContext */
++static void (*pglGenVertexArrays)(GLsizei n, GLuint *arrays);
++static void (*pglBindVertexArray)(GLuint array);
++
+ static struct list context_list = LIST_INIT(context_list);
+ static pthread_mutex_t context_mutex = PTHREAD_MUTEX_INITIALIZER;
+ 
+@@ -1549,7 +1555,8 @@
+             return prev == fmt;
+     }
+ 
+-    if (!(data = get_win_data(hwnd)))
++    /* Gamify: message-only windows (Qt 5's GL dummy window) get their data here */
++    if (!(data = get_win_data(hwnd)) && !(data = macdrv_create_message_window_data(hwnd)))
+     {
+         FIXME("DC for window %p of other process: not implemented\n", hwnd);
+         return FALSE;
+@@ -2736,7 +2743,7 @@
+     struct wgl_context *context;
+     const int *iptr;
+     int major = 1, minor = 0, profile = WGL_CONTEXT_CORE_PROFILE_BIT_ARB, flags = 0;
+-    BOOL core = FALSE;
++    BOOL core = FALSE, forced_core = FALSE;
+     GLint renderer_id = 0;
+ 
+     TRACE("hdc %p, share_context %p, attrib_list %p\n", hdc, share_context, attrib_list);
+@@ -2891,6 +2898,19 @@
+         RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
+         return NULL;
+     }
++    /* Gamify: ForceOpenGLCoreContext.  On Windows a legacy request gets the driver's newest
++       compatibility profile (GL 4.x), on macOS only GL 2.1.  Give such apps the newest core
++       profile instead; a default VAO is bound when it first becomes current. */
++    if (!core && force_gl_core_context && gl_info.max_major >= 3)
++    {
++        TRACE("ForceOpenGLCoreContext: %u.%u legacy request -> %u.%u core\n",
++              major, minor, gl_info.max_major, gl_info.max_minor);
++        major = gl_info.max_major;
++        minor = gl_info.max_minor;
++        flags |= WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
++        core = forced_core = TRUE;
++    }
++
+     if (!core && flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB)
+     {
+         WARN("Forward compatible context requested for GL version < 3\n");
+@@ -2902,6 +2922,7 @@
+ 
+     context->format = format;
+     context->renderer_id = renderer_id;
++    context->forced_core = forced_core;
+     if (!create_context(context, share_context ? share_context->cglcontext : NULL, major))
+     {
+         free(context);
+@@ -3583,6 +3604,14 @@
+     make_context_current(context, FALSE);
+     context->has_been_current = TRUE;
+     NtCurrentTeb()->glContext = context;
++
++    /* Gamify: ForceOpenGLCoreContext, give the app a VAO to use where it expects VAO 0 */
++    if (context->forced_core && !context->default_vao && pglGenVertexArrays && pglBindVertexArray)
++    {
++        pglGenVertexArrays(1, &context->default_vao);
++        pglBindVertexArray(context->default_vao);
++        TRACE("context %p default VAO %u\n", context, context->default_vao);
++    }
+ 
+     return TRUE;
+ }
+@@ -4194,7 +4223,185 @@
+ }
+ 
+ /* CX HACK 23422 - END */
++
++
++/* Gamify: OpenGLAttribDeclarationOrder.  Windows drivers give vertex shader inputs that have no
++   explicit location their locations in declaration order, and some games rely on that (Worms
++   W.M.D feeds IN_Position to location 0 without asking); Apple's linker sorts them by name.
++   Before a program is linked, bind the inputs of its vertex shader in declaration order, unless
++   the app binds locations itself or the shader uses layout(location). */
++static void (*pglLinkProgram)(GLuint program);
++static void (*pglBindAttribLocation)(GLuint program, GLuint index, const GLchar *name);
++static void (*pglGetAttachedShaders)(GLuint program, GLsizei max_count, GLsizei *count, GLuint *shaders);
++static void (*pglGetShaderiv)(GLuint shader, GLenum pname, GLint *params);
++static void (*pglGetShaderSource)(GLuint shader, GLsizei size, GLsizei *length, GLchar *source);
++static CFMutableSetRef app_bound_programs;
++static pthread_mutex_t app_bound_programs_mutex = PTHREAD_MUTEX_INITIALIZER;
++
++static void macdrv_glBindAttribLocation(GLuint program, GLuint index, const GLchar *name)
++{
++    pthread_mutex_lock(&app_bound_programs_mutex);
++    if (!app_bound_programs) app_bound_programs = CFSetCreateMutable(NULL, 0, NULL);
++    if (app_bound_programs) CFSetAddValue(app_bound_programs, (const void *)(UINT_PTR)program);
++    pthread_mutex_unlock(&app_bound_programs_mutex);
++    pglBindAttribLocation(program, index, name);
++}
++
++/* Strip comments and preprocessor lines in place. */
++static void strip_glsl(char *src)
++{
++    char *in = src, *out = src;
++    BOOL line_start = TRUE;
+ 
++    while (*in)
++    {
++        if (in[0] == '/' && in[1] == '/')
++            while (*in && *in != '\n') in++;
++        else if (in[0] == '/' && in[1] == '*')
++        {
++            for (in += 2; *in && !(in[0] == '*' && in[1] == '/'); in++);
++            if (*in) in += 2;
++            *out++ = ' ';
++        }
++        else if (line_start && *in == '#')
++        {
++            while (*in && *in != '\n') in += (in[0] == '\\' && in[1] == '\n') ? 2 : 1;
++        }
++        else
++        {
++            if (*in == '\n') line_start = TRUE;
++            else if (*in != ' ' && *in != '\t' && *in != '\r') line_start = FALSE;
++            *out++ = *in++;
++        }
++    }
++    *out = 0;
++}
++
++static BOOL is_glsl_qualifier(const char *token)
++{
++    static const char * const qualifiers[] =
++        { "centroid", "sample", "smooth", "flat", "noperspective", "invariant", "precise",
++          "highp", "mediump", "lowp" };
++    unsigned int i;
++
++    for (i = 0; i < ARRAY_SIZE(qualifiers); i++)
++        if (!strcmp(token, qualifiers[i])) return TRUE;
++    return FALSE;
++}
++
++/* Parse one global declaration; append the names of vertex inputs to names/slots.
++   Returns FALSE if the declaration has an explicit location. */
++static BOOL parse_glsl_input(char *stmt, const char **names, int *slots, int *count, int max)
++{
++    char *tokens[64], *p, *ctx;
++    int n = 0, i, type_slots;
++
++    if (strstr(stmt, "layout"))
++    {
++        if (strstr(stmt, "location")) return FALSE;
++        if ((p = strchr(stmt, ')'))) stmt = p + 1;
++    }
++    for (p = strtok_r(stmt, " \t\r\n,[]", &ctx); p && n < ARRAY_SIZE(tokens); p = strtok_r(NULL, " \t\r\n,[]", &ctx))
++        tokens[n++] = p;
++
++    for (i = 0; i < n && is_glsl_qualifier(tokens[i]); i++);
++    if (i >= n || (strcmp(tokens[i], "in") && strcmp(tokens[i], "attribute"))) return TRUE;
++    for (i++; i < n && is_glsl_qualifier(tokens[i]); i++);
++    if (i >= n || strchr(tokens[i], '(')) return TRUE;
++
++    type_slots = 1;
++    if (!strncmp(tokens[i], "mat", 3) && tokens[i][3] >= '2' && tokens[i][3] <= '4')
++        type_slots = tokens[i][3] - '0';
++
++    for (i++; i < n && *count < max; i++)
++    {
++        if (tokens[i][0] >= '0' && tokens[i][0] <= '9')  /* array size of the previous name */
++        {
++            if (*count) slots[*count - 1] = type_slots * atoi(tokens[i]);
++            continue;
++        }
++        names[*count] = tokens[i];
++        slots[*count] = type_slots;
++        (*count)++;
++    }
++    return TRUE;
++}
++
++static void bind_vertex_inputs_in_order(GLuint program)
++{
++    GLuint shaders[16];
++    GLsizei shader_count = 0, i;
++
++    pglGetAttachedShaders(program, ARRAY_SIZE(shaders), &shader_count, shaders);
++    for (i = 0; i < shader_count; i++)
++    {
++        const char *names[32];
++        int slots[32], count = 0, depth = 0, j;
++        GLint type = 0, length = 0;
++        char *src, *p, *stmt;
++        GLuint location = 0;
++
++        pglGetShaderiv(shaders[i], GL_SHADER_TYPE, &type);
++        if (type != GL_VERTEX_SHADER) continue;
++        pglGetShaderiv(shaders[i], GL_SHADER_SOURCE_LENGTH, &length);
++        if (length <= 0 || !(src = malloc(length + 1))) continue;
++        pglGetShaderSource(shaders[i], length + 1, NULL, src);
++        src[length] = 0;
++        strip_glsl(src);
++
++        /* walk the declarations at global scope */
++        for (p = stmt = src; *p; p++)
++        {
++            if (*p == '{') depth++;
++            else if (*p == '}') { if (depth) depth--; if (!depth) stmt = p + 1; }
++            else if (*p == ';' && !depth)
++            {
++                *p = 0;
++                if (!parse_glsl_input(stmt, names, slots, &count, ARRAY_SIZE(names)))
++                {
++                    TRACE("program %u shader %u uses explicit locations\n", program, shaders[i]);
++                    count = 0;
++                    break;
++                }
++                stmt = p + 1;
++            }
++        }
++
++        for (j = 0; j < count && location < 16; j++)
++        {
++            if (strncmp(names[j], "gl_", 3))
++            {
++                TRACE("program %u: %s -> %u\n", program, names[j], location);
++                pglBindAttribLocation(program, location, names[j]);
++            }
++            location += slots[j];
++        }
++        free(src);
++    }
++}
++
++static void macdrv_glLinkProgram(GLuint program)
++{
++    BOOL app_bound;
++
++    pthread_mutex_lock(&app_bound_programs_mutex);
++    app_bound = app_bound_programs && CFSetContainsValue(app_bound_programs, (const void *)(UINT_PTR)program);
++    pthread_mutex_unlock(&app_bound_programs_mutex);
++
++    if (!app_bound) bind_vertex_inputs_in_order(program);
++    pglLinkProgram(program);
++}
++
++/* Gamify: ForceOpenGLCoreContext, binding VAO 0 means binding the context's default VAO */
++
++static void macdrv_glBindVertexArray(GLuint array)
++{
++    struct wgl_context *context = NtCurrentTeb()->glContext;
++
++    if (!array && context) array = context->default_vao;
++    pglBindVertexArray(array);
++}
++
+ static void register_extension(const char *ext)
+ {
+     if (gl_info.wglExtensions[0])
+@@ -4349,6 +4556,27 @@
+     /* CX HACK 23422 */
+     REDIRECT(glCompressedTexImage3D);
+     REDIRECT(glCompressedTexSubImage3D);
++
++
++    /* Gamify: OpenGLAttribDeclarationOrder */
++    if (gl_attrib_declaration_order)
++    {
++        pglGetAttachedShaders = dlsym(opengl_handle, "glGetAttachedShaders");
++        pglGetShaderiv = dlsym(opengl_handle, "glGetShaderiv");
++        pglGetShaderSource = dlsym(opengl_handle, "glGetShaderSource");
++        if (pglGetAttachedShaders && pglGetShaderiv && pglGetShaderSource)
++        {
++            REDIRECT(glBindAttribLocation);
++            REDIRECT(glLinkProgram);
++        }
++    }
++
++    /* Gamify: ForceOpenGLCoreContext */
++    if (force_gl_core_context)
++    {
++        pglGenVertexArrays = dlsym(opengl_handle, "glGenVertexArrays");
++        REDIRECT(glBindVertexArray);
++    }
+ #undef REDIRECT
+ 
+     if (gluCheckExtension((GLubyte*)"GL_APPLE_flush_render", (GLubyte*)gl_info.glExtensions))
+@@ -4627,6 +4855,7 @@
+         sync_context(context);
+     }
+ 
++
+     if ((hwnd = NtUserWindowFromDC(hdc)))
+     {
+         struct macdrv_win_data *data;
+--- a/dlls/winemac.drv/window.c
++++ b/dlls/winemac.drv/window.c
+@@ -733,7 +733,43 @@
+ 
+         set_cocoa_view_parent(data, parent);
+     }
++
++    return data;
++}
++
++
++/***********************************************************************
++ *              macdrv_create_message_window_data
++ *
++ * Gamify: create Mac data for a message-only window (parent HWND_MESSAGE)
++ * of the current thread when OpenGL needs it.  Windows lets an app set a
++ * pixel format on a message-only window and make a context current on it;
++ * Qt 5 does that for its "QtOpenGLDummyWindow" and QOffscreenSurface.  The
++ * window gets a Cocoa window that is never shown.  Returns the data locked,
++ * like get_win_data(), or NULL if hwnd is not such a window.
++ */
++struct macdrv_win_data *macdrv_create_message_window_data(HWND hwnd)
++{
++    struct macdrv_win_data *data;
++    HWND parent;
++    UINT dpi;
++
++    if (NtUserGetWindowThread(hwnd, NULL) != GetCurrentThreadId()) return NULL;
++    if (!(parent = NtUserGetAncestor(hwnd, GA_PARENT))) return NULL;
++    if (parent == NtUserGetDesktopWindow() || NtUserGetAncestor(parent, GA_PARENT)) return NULL;
++
++    if (!(data = alloc_win_data(hwnd))) return NULL;
++    data->message_only = TRUE;
++
++    dpi = NtUserGetWinMonitorDpi(hwnd, MDT_DEFAULT);
++    NtUserGetWindowRect(hwnd, &data->rects.window, dpi);
++    NtUserGetClientRect(hwnd, &data->rects.client, dpi);
++    NtUserMapWindowPoints(hwnd, 0, (POINT *)&data->rects.client, 2, dpi);
++    data->rects.visible = data->rects.window;
+ 
++    create_cocoa_window(data);
++    TRACE("message-only win %p/%p window %s client %s\n", hwnd, data->cocoa_window,
++          wine_dbgstr_rect(&data->rects.window), wine_dbgstr_rect(&data->rects.client));
+     return data;
+ }
+ 
+@@ -1863,7 +1899,7 @@
+             set_cocoa_window_properties(data);
+     }
+ 
+-    if (new_style & WS_VISIBLE)
++    if ((new_style & WS_VISIBLE) && !data->message_only)
+     {
+         if (data->cocoa_window)
+         {
