@@ -16,7 +16,10 @@ Gamify.app/Contents/SharedSupport/root/
     src/webhelper-shim/steamwebhelper.exe              our Steam webhelper shim
     scripts/winecx-env.sh                              reference only (Project.looksLikeRoot wants runtimes/ + scripts/)
     THIRD_PARTY_NOTICES.md                             copy of docs/LICENSING.md
+    runtime-version                                    <runtime>-<digest of runtimes/ + src/>, for the updater
 ```
+Releases (version bump, app-only zip, latest.json, GitHub release): `scripts/release.sh`, see
+docs/updates.md.
 `CROSS_RUNTIME=winecx scripts/package-app.sh` bundles the smaller runtime instead.
 Sizes: app 1.4 GB, DMG 508 MB (UDZO).
 

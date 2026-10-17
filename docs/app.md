@@ -51,6 +51,8 @@ cli/Sources/CrossCore/
   SteamStatus.swift  Steam.status(in:): the bottle's Steam processes (libproc) + the newest
                    state of logs/connection_log.txt, and stuckReason (see "Steam status")
   Process.swift    execReplacing / runWaiting / Invocation / spawnDetached / Termination
+  Updater.swift    self-update: latest.json check, download + SHA-256, staging, detached
+                   install helper (docs/updates.md)
   Commands.swift   one function per CLI command, returning an Invocation:
                    loadBottle, createBottle + wineboot, runExe, wineCommand, steam,
                    steamInstaller, steamBootstrap, steamShutdown, waitForBottle, kill,
@@ -63,6 +65,8 @@ app/Sources/CrossApp/
   LogView.swift    NSTextView that tails the selected job's log file
   SettingsView.swift  General tab (tutorial), Environment tab (= `cross env`), Paths tab
   TutorialView.swift  first-run tutorial window (six steps, see below)
+  Updates.swift    UpdateController (launch check, Check for Updates…), the update banner,
+                   Settings > General > Updates (docs/updates.md)
 ```
 
 ### CLI refactor check

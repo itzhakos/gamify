@@ -20,6 +20,10 @@ What is live, in one place; everything below it is the chronological log (dead e
   D3DMetal + shim under Contents/SharedSupport/root, install names relocated, ad-hoc signed)
   and `dist/Gamify-<ver>.dmg` (~515 MB). Bundled app keeps bottles in ~/Library/Application
   Support/Gamify. See docs/packaging.md. First-run tutorial in the app: docs/app.md.
+- **Updates**: the app updates itself from GitHub Releases of a public repo
+  (itzhakos/gamify-releases, feed `releases/latest/download/latest.json`): app-only zip when
+  `SharedSupport/root/runtime-version` matches, else the DMG; detached helper swaps, re-signs,
+  relaunches. `scripts/release.sh <ver>` publishes. Verified locally 0.1 -> 0.2. docs/updates.md.
 - **Repository**: https://github.com/itzhakos/gamify (private, since 2026-10-17). Sources, scripts
   and docs only; runtimes/bottles/downloads/upstream/dist are rebuilt locally (see README.md).
 - **Docs**: README.md, docs/app.md, docs/packaging.md, docs/runtime-full.md, docs/d3dmetal3.md,

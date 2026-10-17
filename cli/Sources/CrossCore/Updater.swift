@@ -241,6 +241,13 @@ public struct Updater {
         try? FileManager.default.removeItem(at: resultFile)
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
         guard lines.count >= 2 else { return nil }
+        if lines[0] == "ok" {
+            // installed: the downloads (a DMG is ~500 MB) are no longer needed
+            for item in (try? FileManager.default.contentsOfDirectory(at: cacheDir, includingPropertiesForKeys: nil)) ?? []
+            where item.hasDirectoryPath {
+                try? FileManager.default.removeItem(at: item)
+            }
+        }
         return UpdateResult(succeeded: lines[0] == "ok", version: lines[1],
                             message: lines.dropFirst(2).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
     }
