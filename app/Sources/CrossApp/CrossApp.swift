@@ -22,11 +22,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct CrossApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var model = AppModel()
+    @StateObject private var updates = UpdateController()
 
     var body: some Scene {
         WindowGroup("Gamify") {
             ContentView()
                 .environmentObject(model)
+                .environmentObject(updates)
                 .frame(minWidth: 860, minHeight: 560)
                 // bottles made by the CLI or scripts while the app was in the background
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -34,6 +36,7 @@ struct CrossApp: App {
                 }
                 .onAppear {
                     delegate.attach { urls in model.openFiles(urls) }
+                    updates.hasRunningJobs = { model.jobs.contains { $0.isRunning } }
                 }
         }
         // opened files go to AppDelegate; never spawn another window for them
@@ -44,6 +47,7 @@ struct CrossApp: App {
                     .keyboardShortcut("r")
             }
             TutorialCommands()
+            UpdateCommands(updates: updates, model: model)
         }
 
         // The first-run tutorial. A window rather than a sheet, so the main window stays
@@ -59,6 +63,7 @@ struct CrossApp: App {
         Settings {
             SettingsView()
                 .environmentObject(model)
+                .environmentObject(updates)
         }
     }
 }
@@ -77,6 +82,7 @@ struct TutorialCommands: Commands {
 
 struct ContentView: View {
     @EnvironmentObject var model: AppModel
+    @EnvironmentObject var updates: UpdateController
     @Environment(\.openWindow) private var openWindow
     @State private var showingNewBottle = false
     @State private var pendingDelete: String?
@@ -123,13 +129,19 @@ struct ContentView: View {
                                        description: Text("Create one with the + button."))
             }
         }
+        // update available / progress / errors: a banner, never a modal
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UpdateBanner()
+        }
         .sheet(isPresented: $showingNewBottle) {
             NewBottleSheet()
         }
         // First launch: open the tutorial once the checkout is located (its bottle step
         // needs the project), so it opens after the Desktop-folder permission prompt.
         .task(id: model.isLocating) {
-            if !model.isLocating && model.shouldOpenTutorialAtLaunch() {
+            guard !model.isLocating else { return }
+            updates.launchOnce(project: model.project)
+            if model.shouldOpenTutorialAtLaunch() {
                 openWindow(id: TutorialView.windowID)
             }
         }

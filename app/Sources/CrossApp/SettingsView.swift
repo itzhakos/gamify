@@ -33,6 +33,7 @@ struct GeneralTab: View {
                 Text("The tutorial walks through bottles, Steam and running games. It opens on the first launch (user default `\(AppModel.tutorialShownKey)`; `CROSS_RESET_TUTORIAL=1` in the environment resets it).")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            UpdateSettingsSection()
         }
         .formStyle(.grouped)
     }

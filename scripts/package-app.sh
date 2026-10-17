@@ -102,6 +102,32 @@ IDENTITY="${CROSS_SIGN_IDENTITY:--}"
 find "$R" -type f \( -perm -u+x -o -name '*.dylib' -o -name '*.so' \) -print0 | while IFS= read -r -d '' f; do
   if head -c 4 "$f" | grep -q $'\xcf\xfa\xed\xfe'; then codesign --force --sign "$IDENTITY" "$f" 2>/dev/null || true; fi
 done
+log "runtime version"
+# The updater (docs/updates.md) ships app-only updates while this stays the same and the
+# full DMG when it changes. A digest of the runtime tree (after relocation and signing), so
+# identical runtimes always get the same version. The loose text files in the root
+# (THIRD_PARTY_NOTICES.md, scripts/) travel with the app layer instead.
+python3 -I - "$R" "$RUNTIME" > "$R/runtime-version" <<'PY'
+import hashlib, os, sys
+root, name = sys.argv[1], sys.argv[2]
+h = hashlib.sha256()
+for top in ("runtimes", "src"):
+    for dp, dn, fn in os.walk(os.path.join(root, top)):
+        dn.sort()
+        for entry in sorted(fn + [d for d in dn if os.path.islink(os.path.join(dp, d))]):
+            p = os.path.join(dp, entry)
+            rel = os.path.relpath(p, root)
+            if os.path.islink(p):
+                h.update(b"L\0" + rel.encode() + b"\0" + os.readlink(p).encode() + b"\0")
+            else:
+                h.update(b"F\0" + rel.encode() + b"\0" + (b"x" if os.access(p, os.X_OK) else b"-") + str(os.path.getsize(p)).encode() + b"\0")
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 22), b""):
+                        h.update(chunk)
+print(f"{name}-{h.hexdigest()[:12]}")
+PY
+echo "runtime-version: $(cat "$R/runtime-version")"
+
 if [ "$IDENTITY" = "-" ]; then
   codesign --force --sign - -r='designated => identifier "local.gamify.app"' "$APP"
 else
