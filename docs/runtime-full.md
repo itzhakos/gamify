@@ -178,8 +178,8 @@ installed tree (`grep -rl winecx-sse` empty; unix .so use `@rpath`). Checked: `c
 steamtest /c ver` and a fresh winecx bottle: Windows 10.0.19043. Bottle steamtest: the
 hand-installed `syswow64/dsound.dll`, its `.wine-x87.bak` and `DllOverrides "dsound"` removed,
 `wineboot --update` reinstalled the runtime's DLL (byte-identical to
-`lib/wine/i386-windows/dsound.dll`, 61 x87 ops). `runtimes/winecx-x87`, `winecx-full-x87` stay
-until the user confirms Portal 2 audio and Worms on the new runtime.
+`lib/wine/i386-windows/dsound.dll`, 61 x87 ops). Shipped in Gamify 0.3. The user confirmed
+Portal 2 audio clean and Worms working; `runtimes/winecx-x87` / `winecx-full-x87` deleted.
 
 ## Sizes
 - `runtimes/winecx-full`: 1.5 GB (winecx: 1.4 GB). 114 dylibs in `lib/`, 31 unix `.so`

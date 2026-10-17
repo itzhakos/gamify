@@ -8,8 +8,8 @@ What is live, in one place; everything below it is the chronological log (dead e
   Since 2026-10-17 both build the i386 PE side with `i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse"`
   (was x87: dsound 1761 -> 61 x87 ops, wined3d 6707 -> 134, ucrtbase 7051 -> 750; 32-bit
   DirectSound mixer 53% -> 6% of a core) and apply `src/patches/*.patch` before configure.
-  The previous x87 builds are kept as `runtimes/winecx-x87` / `winecx-full-x87` until the user
-  confirms Portal 2 audio + Worms. Details: docs/runtime-full.md "i386 PE side built with SSE".
+  User confirmed Portal 2 audio clean and Worms working on it; the old x87 builds were deleted.
+  Details: docs/runtime-full.md "i386 PE side built with SSE".
 - **Graphics**: `runtimes/d3dmetal` = Apple D3DMetal 3.0 from GPTK (default; the .so files are
   symlinks to libd3dshared.dylib). `runtimes/d3dmetal-2.1` = CrossOver's copy, local-only fallback.
 - **Tools**: `cli/` (`cross`, Swift, with the `CrossCore` library) and `app/` (Cross.app, SwiftUI,
