@@ -205,8 +205,9 @@ struct UpdateBanner: View {
                     .buttonStyle(.link)
             }
             Button("Later") { updates.later() }
+            // no .defaultAction: the banner is not modal, a stray Return must not install
             Button("Install Now") { updates.install() }
-                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
         case .downloading:
             Button("Cancel") { updates.later() }
         case .installing:

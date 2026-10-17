@@ -23,7 +23,8 @@ What is live, in one place; everything below it is the chronological log (dead e
 - **Updates**: the app updates itself from GitHub Releases of a public repo
   (itzhakos/gamify-releases, feed `releases/latest/download/latest.json`): app-only zip when
   `SharedSupport/root/runtime-version` matches, else the DMG; detached helper swaps, re-signs,
-  relaunches. `scripts/release.sh <ver>` publishes. Verified locally 0.1 -> 0.2. docs/updates.md.
+  relaunches. `scripts/release.sh <ver>` publishes. 0.1 and 0.2 are published (2026-10-17); a
+  0.1 installed from GitHub updated itself to 0.2. docs/updates.md.
 - **Repository**: https://github.com/itzhakos/gamify (private, since 2026-10-17). Sources, scripts
   and docs only; runtimes/bottles/downloads/upstream/dist are rebuilt locally (see README.md).
 - **Docs**: README.md, docs/app.md, docs/packaging.md, docs/runtime-full.md, docs/d3dmetal3.md,

@@ -148,11 +148,28 @@ What it does, in order:
 The public repository was created once with
 `gh repo create itzhakos/gamify-releases --public`.
 
+## Verified on GitHub (2026-10-17)
+
+`itzhakos/gamify-releases` was created and 0.1 and 0.2 were published with
+`scripts/release.sh` (private repo: commits "Release 0.1"/"Release 0.2", tags v0.1/v0.2).
+0.1 was downloaded from the public release with curl (SHA-256 matched latest.json), installed
+into ~/Applications, quarantine cleared as the README says, and launched with default settings:
+it fetched latest.json from github.com, downloaded Gamify-app-0.2.zip
+(`update-github-downloading.png`), the helper swapped and re-signed in 1 s, and 0.2 relaunched
+with "Gamify was updated to 0.2." (`update-github-done.png`); `codesign --verify --strict` OK.
+
+Notes from the run:
+- After `gh release create`, `releases/latest/download/latest.json` kept serving the previous
+  release for about a minute (GitHub's cache), then switched. Harmless: apps see the new
+  version on their next launch.
+- The install started without a click from the test: the Install Now button was the
+  window's default button, so a Return pressed while `open` brought the app to the front
+  can trigger it. Removed after 0.2 (the banner has no default button now); ships with the
+  next release.
+
 ## Verified (2026-10-17, local feed)
 
-The public repository could not be created from the agent session (the permission guard
-blocks creating public GitHub surfaces without the owner's go-ahead), so the end-to-end test
-used a local feed with the same layout: `scripts/release.sh 0.1 --local` and `0.2 --local`
+Before the public repository existed, the end-to-end test used a local feed with the same layout: `scripts/release.sh 0.1 --local` and `0.2 --local`
 with `RELEASE_URL_BASE=http://127.0.0.1:8765/<ver>`, a small Python server that delays
 `latest.json` and throttles downloads, and the `updateFeedURL` default pointing at it.
 0.1 was installed from its DMG into ~/Applications.
