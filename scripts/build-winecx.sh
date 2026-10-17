@@ -8,8 +8,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/upstream/crossover-sources-25.1.0/sources/wine"
-PREFIX="$ROOT/runtimes/winecx"
-BUILD="$ROOT/build/x86_64/wine"
+# WINECX_PREFIX / WINECX_BUILD build a second copy next to the live one (e.g.
+# runtimes/winecx-sse + build/x86_64-sse), so a running bottle is never touched.
+# The prefix must already hold the deps: clone the live runtime with `cp -Rc` first.
+PREFIX="${WINECX_PREFIX:-$ROOT/runtimes/winecx}"
+BUILD="${WINECX_BUILD:-$ROOT/build/x86_64}/wine"
 SDK="$(xcrun --show-sdk-path)"
 JOBS="$(sysctl -n hw.ncpu)"
 mkdir -p "$BUILD"; cd "$BUILD"
@@ -40,6 +43,10 @@ CONFIGURE_FLAGS=(
   # PE side: Homebrew mingw-w64 (arm64 host cross compilers)
   i386_CC=/opt/homebrew/bin/i686-w64-mingw32-gcc
   x86_64_CC=/opt/homebrew/bin/x86_64-w64-mingw32-gcc
+  # i386 float math in SSE, not x87: mingw gcc defaults to x87 for i686, which Rosetta 2
+  # emulates slowly (32-bit DirectSound mixer at ~98% of a core, docs/portal2-audio.md).
+  # CrossOver's i386 DLLs are SSE too. x86_64 is SSE by ABI, so x86_64_CFLAGS stays default.
+  i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse"
 )
 
 # CodeWeavers generate this header in their packaging; the crash dialog's
