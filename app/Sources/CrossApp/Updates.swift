@@ -57,6 +57,9 @@ final class UpdateController: ObservableObject {
         if let result = updater.takeLastResult() {
             phase = result.succeeded ? .installed(result.version) : .failed("Updating to \(result.version) failed: \(result.message). Details: ~/Library/Logs/Gamify/update.log")
             bannerVisible = true
+            // just updated (or failed to): no check this launch, so the message stays and a
+            // failing automatic install cannot loop
+            return
         }
         guard updatesEnabled(project: project),
               UserDefaults.standard.bool(forKey: Updater.checkOnLaunchKey) else { return }
