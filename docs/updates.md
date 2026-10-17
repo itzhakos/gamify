@@ -119,6 +119,7 @@ signature. Such builds should ship full updates only, or sign on the build machi
 | Key (user default) / env | Default | Meaning |
 |---|---|---|
 | `checkForUpdatesOnLaunch` | true | Settings > General > "Check for updates on launch" |
+| `installUpdatesAutomatically` | false | Settings > General > "Install updates automatically": a launch check that finds an update installs it without waiting for Install Now (the banner still shows the progress) |
 | `updateFeedURL` / `GAMIFY_UPDATE_FEED` | the URL above | another feed (a local `python3 -m http.server` for tests) |
 | `updateForce` / `GAMIFY_UPDATE_FORCE=1` | off | allow checks and installs from a checkout build |
 

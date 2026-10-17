@@ -91,6 +91,10 @@ final class UpdateController: ObservableObject {
                 case .available(let update):
                     phase = .available(update)
                     bannerVisible = true
+                    // Settings > General > "Install updates automatically" (launch check only)
+                    if !userInitiated && UserDefaults.standard.bool(forKey: Updater.autoInstallKey) {
+                        install()
+                    }
                 case .requiresNewerSystem(let update, let minimum):
                     phase = .unsupported(update, minimum: minimum)
                     bannerVisible = true
@@ -270,10 +274,13 @@ struct UpdateSettingsSection: View {
     @EnvironmentObject var model: AppModel
     @EnvironmentObject var updates: UpdateController
     @AppStorage(Updater.checkOnLaunchKey) private var checkOnLaunch = true
+    @AppStorage(Updater.autoInstallKey) private var autoInstall = false
 
     var body: some View {
         Section("Updates") {
             Toggle("Check for updates on launch", isOn: $checkOnLaunch)
+            Toggle("Install updates automatically", isOn: $autoInstall)
+                .disabled(!checkOnLaunch)
             LabeledContent("Version", value: updates.currentVersion)
             LabeledContent("Runtime", value: updates.runtimeVersion ?? "not versioned (source checkout)")
             HStack {

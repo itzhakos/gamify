@@ -16,6 +16,7 @@ public struct Updater {
 
     /// User defaults / environment switches (docs/updates.md).
     public static let checkOnLaunchKey = "checkForUpdatesOnLaunch"
+    public static let autoInstallKey = "installUpdatesAutomatically"
     public static let feedKey = "updateFeedURL"
     public static let forceKey = "updateForce"
 
