@@ -147,3 +147,27 @@ What it does, in order:
 
 The public repository was created once with
 `gh repo create itzhakos/gamify-releases --public`.
+
+## Verified (2026-10-17, local feed)
+
+The public repository could not be created from the agent session (the permission guard
+blocks creating public GitHub surfaces without the owner's go-ahead), so the end-to-end test
+used a local feed with the same layout: `scripts/release.sh 0.1 --local` and `0.2 --local`
+with `RELEASE_URL_BASE=http://127.0.0.1:8765/<ver>`, a small Python server that delays
+`latest.json` and throttles downloads, and the `updateFeedURL` default pointing at it.
+0.1 was installed from its DMG into ~/Applications.
+
+| Test | Result |
+|---|---|
+| Launch 0.1, same runtime in 0.2 | banner "Gamify 0.2 is available (1.7 MB)" (`update-available.png`) |
+| App-layer update (auto-install on), bundle marked quarantined while running | download with progress (`update-downloading.png`), "Restarting Gamify…" (`update-installing.png`), helper swap + `codesign` took 1 s, 0.2 relaunched by itself and says "Gamify was updated to 0.2." (`update-done.png`); 0 files left with `com.apple.quarantine`, `codesign --verify --strict` OK, designated requirement `identifier "local.gamify.app"`, no `.gamify-update`/old layer left |
+| Full update (manifest with a different runtimeVersion) | 540 MB DMG downloaded and verified, copied out of the mounted image (~9 s), whole bundle replaced (new inode), image detached, re-signed, relaunched as 0.2 |
+| Package determinism | three package-app.sh runs gave the same runtime-version `winecx-full-7f45d5cc85c1` |
+| Logic checks | version compare (`0.10 > 0.9`, `0.2 == 0.2.0`), layer choice, minimum macOS, App Translocation refusal |
+
+Not exercised by hand: the Later / Install Now buttons and the menu item (the test could
+not click in the app; the automatic-install path runs the same `install()`), a failing
+install (rollback path), and downloads from github.com itself.
+
+Installs from before this feature (the first 0.1 DMG) have no updater: reinstall them once
+from a DMG built with it.
