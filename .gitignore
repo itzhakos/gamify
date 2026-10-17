@@ -1,0 +1,16 @@
+# Wine prefixes are large and machine-specific
+bottles/
+# Downloaded upstream sources (CrossOver tarballs etc.)
+upstream/
+.DS_Store
+downloads/
+runtimes/
+# out-of-tree build dirs
+build/
+# PE test programs and the webhelper shim are built with `make` in each src/ dir
+src/*/*.exe
+# Swift build products
+.build/
+app/build/
+# packaged app + dmg
+dist/

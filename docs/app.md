@@ -1,0 +1,375 @@
+# Cross.app: the macOS GUI (2026-10-16)
+> Renamed to **Gamify** on 2026-10-17 (bundle id local.gamify.app, app/build/Gamify.app, data in
+> ~/Library/Application Support/Gamify, logs in ~/Library/Logs/Gamify). Paths below that say Cross.app
+> or local.cross.app are the old names.
+
+A SwiftUI bottle manager on top of the same code as the `cross` CLI. It does not
+have its own launch logic: every action asks `CrossCore` for an `Invocation` (program,
+argv, envp, cwd). `cross` `execve()`s it and the app `posix_spawn()`s it.
+
+![cx bottle with Steam running](screenshots/app-cx.png)
+
+## Build and run
+
+```sh
+app/build.sh            # swift build -c release + wraps it into app/build/Cross.app
+open app/build/Cross.app
+```
+
+- No Xcode project. `app/` is a Swift Package (swift-tools 5.9, macOS 14, executable
+  target `CrossApp`) with a local dependency on `../cli` (product `CrossCore`).
+  `build.sh` copies the binary into `build/Cross.app/Contents/MacOS/CrossApp`, adds
+  `app/Info.plist` (bundle id `local.cross.app`) and signs it ad-hoc. `swift build` in
+  `app/` alone builds the bare executable. Release build takes about 6 s.
+- The app finds the checkout like the CLI does: it walks up from its own binary
+  (`Project.locate`). Keep the bundle inside the repo, or set the root in
+  Settings > Paths (stored in the `crossRoot` user default and passed to
+  `Project.locate` as `CROSS_ROOT`, never to Wine).
+- **macOS asks "Cross.app would like to access files in your Desktop folder"**,
+  because the checkout lives on ~/Desktop. The app's first file access blocks until
+  someone answers. The lookup runs off the main thread, so the window shows
+  "Opening the Cross checkout…" in the meantime. With a plain ad-hoc signature,
+  TCC pins the grant to the cdhash, so **every rebuild asked again**: an unanswered
+  prompt left the first test launches with no window for minutes (main thread stuck in
+  the TCC call). `build.sh` therefore signs with an explicit designated requirement
+  `identifier "local.cross.app"`, so one Allow survives rebuilds (verified 2026-10-17: after one Allow, a debug build, i.e. a different binary, opened without a prompt).
+  `CROSS_SIGN_IDENTITY=<identity> app/build.sh` signs with a real certificate instead
+  (this machine has none).
+- The first launch of a new build can take a few extra seconds anyway (system checks
+  of the new binary).
+
+## Structure
+
+```
+cli/Package.swift                 products: executable `cross`, library `CrossCore`
+cli/Sources/CrossCore/
+  Project.swift    root lookup (CROSS_ROOT, walk up from the binary, then the cwd)
+  Runtime.swift    winecx + D3DMetal environment (= scripts/winecx-env.sh)
+  Bottle.swift     bottles/<name>, cross.json + .runtime fallback, list/load/save
+  Steam.swift      webhelper shim, ActiveProcess reset, lock cleanup, installer location,
+                   bootstrap check (isBootstrapped, webhelperLog)
+  SteamStatus.swift  Steam.status(in:): the bottle's Steam processes (libproc) + the newest
+                   state of logs/connection_log.txt, and stuckReason (see "Steam status")
+  Process.swift    execReplacing / runWaiting / Invocation / spawnDetached / Termination
+  Commands.swift   one function per CLI command, returning an Invocation:
+                   loadBottle, createBottle + wineboot, runExe, wineCommand, steam,
+                   steamInstaller, steamBootstrap, steamShutdown, waitForBottle, kill,
+                   environmentLines
+cli/Sources/cross/main.swift      argument parsing + printing only
+app/Sources/CrossApp/
+  CrossApp.swift   App, AppDelegate (files opened with the app), sidebar, New Bottle sheet
+  AppModel.swift   bottles, jobs (processes started from the app), all actions
+  BottleView.swift bottle page: actions, graphics picker, process list, log
+  LogView.swift    NSTextView that tails the selected job's log file
+  SettingsView.swift  General tab (tutorial), Environment tab (= `cross env`), Paths tab
+  TutorialView.swift  first-run tutorial window (six steps, see below)
+```
+
+### CLI refactor check
+`cross` behaves byte-for-byte as before the split. A script ran 21 invocations (usage,
+`--help`, `bottle list`, `env cx`, `env cx --export`, `WINECX_GRAPHICS=wined3d|bogus`,
+`WINEDEBUG`/`MTL_HUD_ENABLED` overrides, a non-winecx bottle, a missing bottle, every
+missing-argument and unknown-option error) against the old binary and the new one,
+copied to the same path (zsh puts the binary path in `$_`). All 42 stdout/stderr+exit
+files were identical, both after the plain split and after main.swift moved onto
+`Commands.swift`. `cross cmd cx /c ver` still prints Windows 10.0.19043.
+
+### Process semantics in the app
+`spawnDetached(_:output:onExit:)` (CrossCore/Process.swift): `posix_spawn` with
+argv[0] = program and exactly the Invocation's envp. The cwd is set with
+`posix_spawn_file_actions_addchdir_np` (as `cross run` chdirs before execve). stdin
+is /dev/null, and stdout+stderr are appended to a log file. The child gets its own
+process group, default signal handlers, an empty signal mask and
+`POSIX_SPAWN_CLOEXEC_DEFAULT`. A background thread `waitpid`s and reports
+`Termination` (exit code or signal). Output goes to a **file, not a pipe**, so a game or
+Steam keeps running and logging after the app quits. This was checked: Steam's
+`wine steam.exe` was reparented to launchd and stayed up. `cross bottle create`
+(wineboot) and `bottle delete` use the same functions as the CLI.
+
+Logs: `~/Library/Logs/Cross/<bottle>/<yyyyMMdd-HHmmss>-<label>.log`, starting with
+`$ cd <cwd>` and `$ <program> <args>` lines written by the app.
+
+The environment is inherited from the app's own process, as `cross` inherits the
+shell's. From Finder that is launchd's environment. **`open` from a shell passes that
+shell's whole environment** (including any tokens in it) to the app and so to Wine.
+For a Finder-like launch from a terminal:
+`env -i HOME=$HOME USER=$USER TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin open app/build/Cross.app`.
+
+## What works (verified 2026-10-16, macOS 27.0.1, M4 Max)
+
+- Build: `app/build.sh` with no warnings. The app launches, and window ids come from
+  `scripts/listwindows.swift`. Screenshots are in docs/screenshots/.
+- Sidebar: every directory in bottles/, settings from cross.json with the .runtime
+  fallback (exactly `Bottle.list`, as in `cross bottle list`). Non-winecx bottles
+  (steam11, steamcx, test) are listed as "bottle.sh only", with actions disabled. The
+  list reloads when the app becomes active and on ⌘R.
+- **Create bottle** (+ button: name, runtime winecx, graphics D3DMetal/wined3d): created
+  `bottles/apptest` with `{"graphics":"wined3d","runtime":"winecx"}` plus `.runtime`.
+  wineboot ran as a job with its log while the UI stayed usable. Afterwards
+  `cross bottle list` shows it and `cross cmd apptest /c ver` works.
+- **Graphics picker** (segmented, in the bottle header) rewrites cross.json
+  (apptest switched to d3dmetal, sidebar updated). It applies to programs started
+  afterwards.
+- **Launch Steam in `cx`**: the same steps as `cross steam` (shim install, ActiveProcess
+  reset via regedit, lock cleanup, `steam.exe -noverifyfiles -no-cef-sandbox`, cwd
+  = Steam dir) ran off the main thread. The "Sign in to Steam" window appeared after
+  about 4 s, then Steam auto-logged in and rendered the store
+  ([screenshot](screenshots/steam-cx-from-app.png)). `lsof` confirmed the webhelper
+  belonged to bottles/cx.
+- **Run .exe**: the open panel starts in the bottle's drive_c and takes optional
+  arguments. The same code path runs for an .exe dropped on a bottle page or opened
+  with the app (`open -a app/build/Cross.app game.exe`, which runs it in the selected
+  bottle; Info.plist declares `com.microsoft.windows-executable` as a Viewer type).
+  Verified with `src/d3dtest/d3d11test.exe` in apptest: cwd = its dir, log shows
+  "AMD Compatibility Mode", feature level 11_0, 120 frames at 59.7 fps (D3DMetal).
+- **cmd**: "Command Prompt" opens Wine's console window (`wineconsole cmd`, because the
+  CLI's `cross cmd` needs a terminal). The `cmd /c …` field runs a line with its output
+  in the log: `ver` gives Windows 10.0.19043, exit 0.
+- **Wine Configuration** (winecfg) and **Explorer** open their windows.
+- **Kill Bottle** (`wineserver -k`) closed winecfg and the console in apptest. Per-job
+  **Stop** sends SIGTERM to that process only.
+- **Settings > Environment**: `Runtime.environmentLines`, the function `cross env`
+  prints with, for any winecx bottle, with the `--export` format toggle. The
+  "only variables Cross sets" filter (on by default) hides inherited variables. With
+  it off, the output is the full `cross env`.
+- **Settings > Paths**: root, runtime, D3DMetal, wined3d, shim and logs paths with
+  existence checks, plus the root override.
+- Delete bottle (sidebar context menu, with confirmation): `wineserver -k` + remove,
+  like `cross bottle delete`.
+
+## Not done / stubbed
+
+- **Install Steam: verified end to end (2026-10-16) in `apptest`, from app buttons
+  only.** One click on Install Steam ends at a rendered "Sign in to Steam" window
+  ([screenshot](screenshots/steam-apptest-install-from-app.png)), about a minute with the
+  cached installer. What was found and changed:
+  - `SteamSetup.exe /S` (exit 0, ~3 s) installs only the 7 MB bootstrapper
+    (`Steam.exe`, `bin`, `public`, `uninstall.exe`; no `bin/cef`).
+  - The normal launch (`steam.exe -noverifyfiles -no-cef-sandbox`) **cannot** bootstrap:
+    with -noverifyfiles the bootstrapper logs "Verification skipped", downloads
+    nothing and shows a "Steam - Fatal Error" box. So "Launch Steam twice" would not
+    have helped.
+  - Without -noverifyfiles the first start downloads and installs the win32 then
+    win64 client (~1.7 GB), restarting itself twice (the first wine process exits 42),
+    then starts Valve's `steamwebhelper.exe`: "Sign in to Steam" appears but is black,
+    as expected without the shim. `steam.exe -shutdown` + `wineserver -w` end it in
+    about 6 s; the next normal launch installs the shim and renders.
+  - The app now chains this. Install Steam: steam-setup job, then (exit 0) the
+    **steam-bootstrap** job (`Runtime.steamBootstrap`: ActiveProcess reset, lock
+    cleanup, `steam.exe -no-cef-sandbox`). It waits until `bin/cef/cef.win*` has a
+    webhelper and `logs/webhelper.txt` ("webhelper launched") was written after the
+    launch, plus 5 s, then runs **steam-shutdown** (`steam.exe -shutdown`),
+    **wineserver-w** (`wineserver -w`) and the normal **steam** launch (shim, flags).
+    Launch Steam on an installed but not bootstrapped bottle runs the same chain.
+    While it runs the button reads "Setting up Steam…" and is disabled. Each step has
+    its own log; the bootstrap log ends with "cross: client bootstrapped; restarting
+    Steam with the webhelper shim". `lsof` confirmed the running webhelper is the shim
+    from bottles/apptest.
+  - Limits: the wait gives up after 30 min (alert, then Launch Steam retries).
+    `wineserver -w` also waits for anything else running in the bottle (winecfg, a
+    console). Not logged in, so the first post-login update was not exercised.
+  - The CLI is unchanged: `cross steam` on a fresh install still launches with
+    -noverifyfiles and hits the Fatal Error (fix by running
+    `cross run <bottle> ".../Steam/steam.exe" -no-cef-sandbox` once, then
+    `steam.exe -shutdown`). CrossCore only gained new functions; main.swift and the
+    existing functions are untouched, so `cross` output is the same.
+- I did not click through the open panel itself: it runs in a separate system process.
+  Its code path is the same as drag-drop/`open -a`, which was verified.
+- Only the winecx runtime is driven, same as the CLI. Bottles on gptk/wine11/sikarugir
+  are shown read-only.
+- No program library or shortcuts (.lnk scanning, icons), no winetricks/DLL overrides
+  UI, no per-bottle env overrides (WINEDEBUG, MTL_HUD_ENABLED etc. come only from the
+  app's environment), no app icon.
+- The job list is in memory only; logs stay on disk. A game started by Steam is
+  Steam's child, not a job, so use Kill Bottle for it.
+- The app bundle must stay inside the checkout, or have its root set in Settings.
+  There is no installer or notarization.
+
+
+## Runtimes (2026-10-17)
+The app and the CLI drive every runtime in `Runtime.known` (winecx, winecx-full). The New
+Bottle sheet offers the runtimes whose build exists (`Runtime.available(in:)`); a bottle keeps
+the runtime in its cross.json and every launch resolves it with `Runtime.loadBottle(_:in:)`.
+Settings > Runtimes shows both homes. winecx-full adds the GStreamer plugin variables.
+
+## First-run tutorial (2026-10-17)
+
+A six-step walkthrough in its own window ("Welcome to Cross", SwiftUI `Window` scene
+with id `tutorial`, 640×600, not a sheet: the main window stays usable, so the bottle
+the tutorial creates shows up in the sidebar while wineboot runs). Back / Next / Skip
+Tutorial in the footer, Finish on the last step. Code: `app/Sources/CrossApp/TutorialView.swift`,
+hooks in `AppModel` (`shouldOpenTutorialAtLaunch`, `newBottleNameError`,
+`suggestedBottleName`, `installRosetta`, `recheckRosetta`; `createBottle` now returns its
+wineboot `Job`). Written for someone who got the .app and knows nothing:
+no paths of the checkout, no Wine jargon.
+
+| Step | Content | Adapts to |
+|---|---|---|
+| 1 Welcome | What Cross is (Wine + D3DMetal, through Rosetta), what works (DX9–12, Steam, plain .exe) and what does not (kernel anti-cheat, drivers). | – |
+| 2 Rosetta 2 | Why it is needed. | Installed (`Runtime.rosettaAvailable`): green check. Missing: **Install Rosetta 2…** runs `softwareupdate --install-rosetta --agree-to-license` through `NSAppleScript` "with administrator privileges" (the standard macOS password dialog), then `Runtime.recheckRosetta()`; when that returns true the tutorial moves on to the bottle step by itself. Also the command with Copy and **Check Again** buttons for a Terminal install. |
+| 3 Bottles | What a bottle is. | No drivable bottle: "Create your first bottle" (name field, default `games`/`games2`…, runtime = `Runtime.preferred`, D3DMetal; the runtime line is hidden when only one runtime is available). Bottles exist: a popup to pick one (with "Steam installed" hints) or "Create a new bottle". **Create Bottle** calls `AppModel.createBottle` and shows the wineboot job's status line and log inline. Rosetta or runtime missing: a warning instead of the form. |
+| 4 Steam | What Install Steam does (installer, first start with the 1.7 GB client download and a black window, restart, sign-in window; Cross never sees the password). | Bottle from step 3 with no Steam: **Install Steam** (disabled while its wineboot still runs) = `AppModel.installSteam`, then the step shows the latest job's status and log while `steamSetup` contains the bottle. Steam installed: "already installed" (or "installed, sign in" when started from the tutorial) with a Launch Steam button. No bottle chosen: a hint. |
+| 5 Run a game | Launch Steam, Run .exe…, drag-and-drop / open with Cross; graphics picker, winecfg/cmd/Explorer, Kill Bottle. | – |
+| 6 Where things live | Bottles (`Project.bottles`), Logs (`~/Library/Logs/Cross`), Downloads (`Project.downloads`), each with a Show-in-Finder button; Settings (SettingsLink). Finish. | Paths come from the located project, so a bundled app shows Application Support, not a checkout. |
+
+When it shows:
+- First launch: `AppModel.shouldOpenTutorialAtLaunch()` returns true when the user default
+  `tutorialShown` (domain `local.cross.app`) is not set, and sets it right away (closing the
+  window counts as seen). `ContentView` opens the window once `isLocating` is false, i.e.
+  after the Desktop-folder permission prompt, so the bottle step has a project.
+- Replay: **Help > Cross Tutorial** (`TutorialCommands`) or **Settings > General > Show
+  Tutorial Again**. "Show on Next Launch" there clears the flag.
+- Reset for testing: `defaults delete local.cross.app tutorialShown`, or launch with
+  `CROSS_RESET_TUTORIAL=1` in the environment (AppModel.init removes the key), e.g.
+  `env -i HOME=$HOME USER=$USER TMPDIR=$TMPDIR PATH=/usr/bin:/bin:/usr/sbin:/sbin CROSS_RESET_TUTORIAL=1 open app/build/Cross.app`.
+
+Verified 2026-10-17 (release build, `CROSS_RESET_TUTORIAL=1`, driven with System Events
+clicks on the footer buttons): every step rendered
+([1](screenshots/tutorial-1-welcome.png), [2](screenshots/tutorial-2-rosetta.png),
+[3 pick](screenshots/tutorial-3-bottles-pick.png), [3 create](screenshots/tutorial-3-bottles-create.png),
+[3 creating](screenshots/tutorial-3-bottles-creating.png), [3 created](screenshots/tutorial-3-bottles-created.png),
+[4 install](screenshots/tutorial-4-steam-install.png), [4 progress](screenshots/tutorial-4-steam-progress.png),
+[4 done](screenshots/tutorial-4-steam-done.png), [5](screenshots/tutorial-5-run.png),
+[6](screenshots/tutorial-6-locations.png)). Create Bottle made `bottles/games`
+(`{"graphics":"d3dmetal","runtime":"winecx"}`), wineboot exit 0 in about 15 s with its log in
+the tutorial, the bottle selected in the main window and listed by `cross bottle list`.
+Install Steam from the tutorial ran the steam-setup → steam-bootstrap → steam-shutdown →
+wineserver-w → steam chain in `games` with the bootstrap log tailing inside the step, and
+ended about 50 s later (cached installer) at a rendered "Sign in to Steam" window
+([screenshot](screenshots/tutorial-4-steam-signin.png)); the step then read "Steam is
+installed in 'games' and should be showing its Sign in window". The Rosetta-missing branch could not be
+exercised on this machine (Rosetta is installed); its install path is the documented
+`NSAppleScript` call followed by `Runtime.recheckRosetta()`. The New Bottle sheet also
+defaults to `Runtime.preferred` and hides the Runtime picker when only one runtime is present.
+
+Settings > Paths was reorganised for the packaged app
+([screenshot](screenshots/settings-paths.png)): "Your data" (`Project.bottles`,
+`Project.downloads`, logs), "Runtime" (only the available runtimes, D3DMetal, wined3d, the
+shim, `Project.notices`, Rosetta 2 state) and "App" (bundled: just the runtime files
+location) or "Checkout" (root plus the root override, shown only when not bundled).
+
+
+## Steam status, stuck detection and Restart Steam (2026-10-17)
+
+Background: a Steam that lost its connection (Mac asleep, network change) does not
+recover by itself, and `steam.exe` is single-instance per prefix, so Launch Steam only
+forwarded to the stale client: the user saw "NO CONNECTION" while the Mac, the account
+and Wine's networking were fine. A `steamwebhelper_real.exe` can also outlive a crashed
+or killed `steam.exe`. `cross kill cx` + a normal launch fixed it. The app now does that
+itself, without the user knowing what wineserver is.
+
+### CrossCore: `Steam.status(in:)` (`cli/Sources/CrossCore/SteamStatus.swift`)
+- **Processes** (`Steam.processes(in:)`): every process whose working directory is inside
+  the bottle's prefix, found with libproc (`proc_listallpids`,
+  `proc_pidinfo(PROC_PIDVNODEPATHINFO)` for the cwd, `PROC_PIDTBSDINFO` for the start
+  time) and `sysctl KERN_PROCARGS2` for the Windows command line. The environment of a
+  Rosetta process is not readable from another process (`ps -E` shows nothing for them),
+  but Wine keeps the unix cwd inside the prefix: `steam.exe` runs in its Steam dir and
+  the webhelpers inherit it, `C:\windows\...` services run in drive_c/windows.
+  `steam.exe -shutdown` requests are not counted as Steam. About 10 ms for 1000 pids.
+  `Processes.hasOrphanWebhelper`: webhelper processes but no `steam.exe`.
+- **Connection** (`Steam.connection(in:)`): the newest line of
+  `Program Files (x86)/Steam/logs/connection_log.txt` that carries a state, i.e.
+  `[2026-10-17 13:23:40] [Logged On, 4, 7] [U:1:…] …`. Only the last 128 KB are read;
+  Steam rotates the file on start, so the newest session is always in it. States seen in
+  cx: Connecting, Connected, Logging On, Logged On, Logging Off, Logged Off.
+  `ConnectionState`: `.loggedOn`, `.connecting` (Connecting/Connected/Logging On) and
+  `.loggedOff(name)` for everything else ("Logged Off", "No Connection", …), plus the
+  reason when the log gives one ("Session Replaced", "Disconnected By Remote Host").
+  The file has CRLF line endings; Swift treats `\r\n` as one Character, so the parser
+  splits on `isNewline`, not on `"\n"` (that bug returned nil on the first try).
+- **`Status.stuckReason`** (plain English, shown to the user):
+  - an orphaned webhelper: "Steam's window process is still running, but Steam itself has quit.";
+  - `steam.exe` older than 90 s (`Status.startupGrace`) and the newest state is
+    `.loggedOff` with a timestamp after the process start: "Steam lost its connection at
+    15:48 (Session Replaced).";
+  - `.connecting` for more than 90 s: "Steam has been trying to connect since …".
+  A fresh start is never stuck: the previous session's "Logged Off" line is older than
+  the process, and the 90 s grace covers the connect. The 2026-10-17 incident would have
+  matched the second rule: the newest state line was "Logged Off … Session Replaced" from
+  the previous day, written after that steam.exe started, and the hourly
+  `CClientJobGetClientUpdateHosts: failed to get updated list, error 3` lines that
+  followed carry no state.
+
+### App
+- **Restart Steam** (`AppModel.restartSteam`), the button next to Launch Steam, with a job
+  per step so the list shows the progress: `steam-shutdown` (`steam.exe -shutdown`),
+  `wineserver-w` (up to 20 s, then the job is stopped), `wineserver-k` (to be sure: a
+  stuck client or an orphan does not react to -shutdown), a second `wineserver-w` (up to
+  10 s, so the new Steam does not race the dying server), then the normal `steam` launch
+  (shim, ActiveProcess reset, lock cleanup). While it runs the button reads "Restarting
+  Steam…" and the status line "Steam: restarting…" (`steamRestarting`).
+- **Launch Steam checks first** (`AppModel.launchSteam`): when the client is bootstrapped
+  it reads `Steam.status` off the main thread; if `stuckReason` is set the bottle page shows
+  the alert "Steam looks stuck" with the reason and "Restart it? Steam quits and starts again;
+  nothing is lost." (Restart Steam / Cancel, `steamStuckPrompt`). Otherwise the launch runs
+  as before (a healthy running Steam just gets its window raised by the forwarding).
+- **Status line** under the actions on the bottle page (only when Steam is installed):
+  "Steam: installed, not running" / "running, starting…" (no state line yet for this
+  process) / "running, connecting…" / "running, online" / "running, offline since 15:48" /
+  "not running properly" (orphan), with a dot (grey, orange, green, red) and, when
+  `stuckReason` is set, the reason and a small Restart Steam button. `BottleView` refreshes
+  `model.steamStatus[bottle]` every 3 s in a `.task(id:)` loop while the page is shown.
+- **Tutorial**, Steam step: one sentence pointing at Restart Steam for a Steam that shows
+  "No connection" or stops responding.
+- The CLI is unchanged (CrossCore only gained `SteamStatus.swift`).
+
+### Verification status (2026-10-17, bottle `steamtest`)
+`bottles/cx` (and every other bottle) disappeared from `bottles/` at 13:36:45 while this was
+being built: the user had deleted them to free disk space (confirmed afterwards). With
+the parent session's OK a new bottle **`steamtest`** (winecx, D3DMetal) was created with the
+CLI and Steam installed from the app's Install Steam button (setup → bootstrap → shutdown →
+wineserver -w → steam, about a minute, ending at "Sign in to Steam"). Everything below was
+first verified signed out; the signed-in case was verified afterwards, see the last bullet.
+
+Verified in the app (release build, driven with System Events clicks and screenshots):
+- **Signed-in re-logon (verified 2026-10-17 14:47)**: with the user signed in to Steam in
+  `steamtest` (logon 'OK' at 14:20), steam.exe was killed with
+  `pkill -f 'steam.exe -noverifyfiles'` (the status line went to "installed, not running"),
+  then Restart Steam was clicked in the app: jobs steam-shutdown, wineserver-w, wineserver-k,
+  wineserver-w, steam ran in order, and connection_log.txt showed a fresh
+  `LogOn() called` → `ConnectionCompleted` → `RecvMsgClientLogOnResponse() : 'OK'` three
+  seconds after the new steam.exe started; the status line read "Steam: running, online"
+  (green). Steam's saved refresh token survives the restart, so no sign-in is needed.
+- **Status line**: "Steam: installed, not running", then after Launch Steam
+  "Steam: running, connecting…" with the orange dot
+  ([screenshot](screenshots/steam-status-running.png)); on the current build the signed-out
+  states read "running, not signed in" (connection lines carry `[U:1:0]`).
+- **Orphaned webhelper**: `pkill` of steam.exe takes the webhelper down with it at the
+  sign-in window (SIGTERM and SIGKILL alike), unlike the incident on the signed-in cx. The
+  orphan was reproduced by starting `steamwebhelper_real.exe --disable-gpu --single-process`
+  alone in the bottle (`cross run`): `Steam.status` reported `orphan: true`, the status line
+  turned red, "Steam: not running properly", with the reason and a Restart Steam button
+  ([screenshot](screenshots/steam-status-stuck.png)).
+- **Launch Steam on the stuck bottle** showed the alert "Steam looks stuck" with the reason
+  and Restart Steam / Cancel ([screenshot](screenshots/steam-stuck-alert.png)); it waits for
+  the click (checked for 24 s with no input: no job started). Restart Steam is the default
+  button (Return accepts it).
+- **Restart Steam** from the alert: no steam.exe, so the `-shutdown` step is skipped;
+  `wineserver-w` ran into its 20 s limit (the orphan ignores -w) and was stopped (shows as
+  "signal 15"), `wineserver-k` exit 0, the second `wineserver-w` exit 0 at once, then the
+  `steam` job; the button read "Restarting Steam…" and the status line "Steam: restarting…"
+  ([screenshot](screenshots/steam-restarting.png)). The "Sign in to Steam" window was back
+  28 s after the click, `Steam.status` found steam.exe plus two webhelpers, the status line
+  read "running, connecting…" ([screenshot](screenshots/steam-restarted.png)).
+- **Log parser** on the real cx excerpts (CRLF): "Session Replaced" → loggedOff with that
+  reason and the account; "user initiated logoff" → loggedOff, `isSignedOut`; `[U:1:0]` →
+  no account. On the live cx before it vanished: steam.exe + 2 webhelpers found, "Logged On
+  at 13:23:40", not stuck, 8 ms.
+
+Found on the way:
+- **`steam.exe -shutdown` with no client running starts the bootstrapper**, which verifies
+  the whole install (no -noverifyfiles) for 3-4 minutes. `restartSteam` therefore runs the
+  shutdown step only when a steam.exe is running, and stops it after 15 s.
+- **After an unclean end Steam's next start often quits by itself** after 2-3 s: the job log
+  shows "Looks like steam didn't shutdown cleanly, scheduling immediate update check",
+  "Nothing to do", "Verification skipped", "Shutdown"; the start after that works. Seen on
+  three of four starts after a kill or wineserver -k today. `startSteamAgainIfItQuits`
+  (used by Launch Steam and by the restart's final step) watches the `steam` job for 15 s
+  and starts it once more when it ended with no steam.exe left (log line "cross: Steam quit
+  right after starting …"). While it watches, the button stays "Restarting Steam…".
+- The `.alert` is not reachable through System Events (no sheet, no window); it was
+  accepted with a Return keystroke. `click at {x,y}` needs assistive access for osascript.
+- The user was clicking in the app during the first run (Restart Steam twice, Kill Bottle
+  twice, windows moved between displays), which produced overlapping job chains in the
+  logs of 13:45-13:49; nothing in them is a bug of the chain itself.
