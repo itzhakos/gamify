@@ -61,6 +61,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var steamStatus: [String: Steam.Status] = [:]
     /// Launch Steam found a stuck Steam: the bottle page asks whether to restart it.
     @Published var steamStuckPrompt: SteamStuckPrompt?
+    /// Use of each image-backed bottle's disk, refreshed with the Steam status.
+    @Published private(set) var storageUsage: [String: StorageUsage] = [:]
+    /// Free space on the Mac's disk that holds bottles/ (shown for folder bottles).
+    @Published private(set) var hostFreeBytes: Int64 = 0
+    /// Bottles being resized or moved (folder <-> disk image), with the current step.
+    @Published private(set) var storageWork: [String: String] = [:]
 
     struct SteamStuckPrompt: Identifiable, Equatable {
         let id = UUID()
@@ -200,9 +206,10 @@ final class AppModel: ObservableObject {
         bottles.first { $0.name == name }
     }
 
-    /// Gamify (like the CLI) drives winecx and winecx-full bottles; others go through scripts/bottle.sh.
+    /// Gamify (like the CLI) drives winecx and winecx-full bottles; others go through
+    /// scripts/bottle.sh. A bottle whose disk image cannot be mounted is not drivable.
     func isDrivable(_ bottle: Bottle) -> Bool {
-        Runtime.isKnown(bottle.config.runtime)
+        Runtime.isKnown(bottle.config.runtime) && bottle.storageError == nil
     }
 
     /// Known runtimes whose build is present (runtimes/winecx, runtimes/winecx-full).
@@ -227,7 +234,7 @@ final class AppModel: ObservableObject {
     }
 
     func isBusy(_ bottle: String) -> Bool {
-        jobs.contains { $0.bottle == bottle && $0.isRunning }
+        jobs.contains { $0.bottle == bottle && $0.isRunning } || storageWork[bottle] != nil
     }
 
     /// The environment `cross env <bottle>` prints, computed from the app's own environment.
@@ -253,6 +260,10 @@ final class AppModel: ObservableObject {
     func start(_ label: String, in bottleName: String,
                make: @escaping @Sendable (Runtime, Bottle, Job) async throws -> Invocation) -> Job? {
         guard let project else { alertMessage = loadError ?? "no project"; return nil }
+        if let work = storageWork[bottleName] {
+            alertMessage = "'\(bottleName)' is busy with its disk (\(work)). Try again when that is done."
+            return nil
+        }
         let dir = logsRoot.appendingPathComponent(bottleName)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let stamp = Self.stampFormatter.string(from: Date())
@@ -564,6 +575,68 @@ final class AppModel: ObservableObject {
         Darwin.kill(pid, SIGTERM)
     }
 
+    // MARK: - Storage
+
+    /// The size a new bottle's disk image gets by default (nil: too little free space,
+    /// the bottle becomes a plain folder).
+    var defaultStorageGB: Int? {
+        guard let project else { return nil }
+        return Runtime.defaultStorageGB(project: project)
+    }
+
+    /// Sizes the New Bottle sheet and the Change… sheet accept for `bottle` (or a new one).
+    func storageRange(for bottle: Bottle? = nil) -> ClosedRange<Int> {
+        guard let project else { return BottleStorage.minimumGB...BottleStorage.minimumGB }
+        guard let bottle else { return Runtime.storageRange(project: project) }
+        let used = storageUsage[bottle.name]?.used ?? bottle.storageUsage?.used ?? 0
+        return Runtime.storageRange(project: project, currentUse: used)
+    }
+
+    /// statfs of the bottle's volume and of the host disk, off the main thread.
+    func refreshStorage(_ name: String) async {
+        guard let bottle = bottle(named: name), let project else { return }
+        let (usage, free) = await Task.detached {
+            (bottle.storageUsage, DiskImage.hostFreeBytes(at: project.bottles))
+        }.value
+        storageUsage[name] = usage
+        hostFreeBytes = free
+    }
+
+    /// Change… on the bottle page: resize an image, move a folder bottle into an image
+    /// of `sizeGB`, or (nil) move an image bottle back into a folder. Refused while
+    /// anything runs in the bottle; CrossCore checks again (wineserver included).
+    func setStorage(_ sizeGB: Int?, for name: String) {
+        guard let bottle = bottle(named: name), let project, storageWork[name] == nil else { return }
+        if isBusy(name) || !Steam.bottleProcesses(in: bottle).isEmpty || bottle.hasRunningServer {
+            alertMessage = "Programs are running in '\(name)'. Quit them (or use Kill Bottle) before changing its disk."
+            return
+        }
+        storageWork[name] = "Preparing…"
+        Task.detached {
+            let report: @Sendable (String) -> Void = { text in
+                Task { @MainActor in self.storageWork[name] = text }
+            }
+            do {
+                let runtime = try Runtime.forBottle(bottle, project: project)
+                switch (sizeGB, bottle.image) {
+                case (nil, nil): break
+                case (nil, _?): _ = try runtime.moveToFolder(bottle, progress: report)
+                case (let gb?, nil): _ = try runtime.moveToImage(bottle, sizeGB: gb, progress: report)
+                case (let gb?, _?):
+                    report("Resizing to \(gb) GB…")
+                    _ = try runtime.resizeStorage(bottle, to: gb)
+                }
+            } catch {
+                await MainActor.run { self.alertMessage = "\(name): \(error)" }
+            }
+            await MainActor.run {
+                self.storageWork[name] = nil
+                self.reloadBottles()
+            }
+            await self.refreshStorage(name)
+        }
+    }
+
     // MARK: - Bottle management
 
     func setGraphics(_ graphics: Graphics, for name: String) {
@@ -580,13 +653,15 @@ final class AppModel: ObservableObject {
     /// `cross bottle create`: writes cross.json, then runs wineboot --init as a job so
     /// the bottle shows up (with its log) right away.
     /// Returns the wineboot job (nil when the bottle could not be created).
+    /// `storageGB`: size of the bottle's own disk image; nil makes a plain folder.
     @discardableResult
-    func createBottle(name: String, runtime runtimeName: String? = nil, graphics: Graphics) -> Job? {
+    func createBottle(name: String, runtime runtimeName: String? = nil, graphics: Graphics, storageGB: Int?) -> Job? {
         guard let project else { alertMessage = loadError ?? "no project"; return nil }
         let runtimeName = runtimeName ?? Runtime.preferred(in: project)
         let runtime = Runtime(project: project, name: runtimeName)
         do {
-            _ = try runtime.createBottle(name: name, config: BottleConfig(runtime: runtimeName, graphics: graphics))
+            _ = try runtime.createBottle(name: name, config: BottleConfig(runtime: runtimeName, graphics: graphics),
+                                         storageGB: storageGB)
         } catch {
             alertMessage = "\(error)"
             return nil
@@ -600,13 +675,11 @@ final class AppModel: ObservableObject {
 
     func deleteBottle(_ name: String) {
         guard let bottle = bottle(named: name) else { return }
-        let project = self.project
+        guard let project else { return }
         Task.detached {
-            if let project, let runtime = try? Runtime.forBottle(bottle, project: project) {
-                _ = try? runWaiting(try runtime.kill(bottle), quiet: true)
-            }
             do {
-                try FileManager.default.removeItem(at: bottle.prefix)
+                // wineserver -k, eject the disk image (if any), remove image and prefix
+                try Runtime(project: project, name: bottle.config.runtime).deleteBottle(bottle)
             } catch {
                 await MainActor.run { self.alertMessage = "\(error)" }
             }

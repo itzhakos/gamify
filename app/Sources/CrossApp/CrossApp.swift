@@ -167,14 +167,20 @@ struct BottleRow: View {
     @EnvironmentObject var model: AppModel
     let bottle: Bottle
 
+    private var subtitle: String {
+        if bottle.storageError != nil { return "disk image unavailable" }
+        guard model.isDrivable(bottle) else { return "\(bottle.config.runtime) · bottle.sh only" }
+        let disk = bottle.config.storage.map { " · \($0.sizeGB) GB" } ?? ""
+        return "\(bottle.config.runtime) · \(bottle.config.graphics.rawValue)\(disk)"
+    }
+
     var body: some View {
         HStack {
             Image(systemName: "wineglass")
                 .foregroundStyle(model.isDrivable(bottle) ? Color.accentColor : .secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(bottle.name)
-                Text(model.isDrivable(bottle) ? "\(bottle.config.runtime) · \(bottle.config.graphics.rawValue)"
-                                              : "\(bottle.config.runtime) · bottle.sh only")
+                Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -192,8 +198,12 @@ struct NewBottleSheet: View {
     @State private var name = ""
     @State private var runtimeName = Runtime.defaultName
     @State private var graphics: Graphics = .d3dmetal
+    @State private var ownDisk = true
+    @State private var sizeGB = BottleStorage.defaultGB
 
     private var nameError: String? { model.newBottleNameError(name) }
+    private var sizeRange: ClosedRange<Int> { model.storageRange() }
+    private var sizeValid: Bool { !ownDisk || sizeRange.contains(sizeGB) }
 
     static func runtimeTitle(_ rt: String) -> String {
         rt == "winecx-full" ? "winecx-full (Wine 10.0 + GStreamer, SDL2, MoltenVK)" : "winecx (Wine 10.0, CrossOver lineage)"
@@ -225,20 +235,44 @@ struct NewBottleSheet: View {
                 Text("Sets up the new bottle's C: drive (about 40 s).")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section {
+                Picker("Disk", selection: $ownDisk) {
+                    Text("Its own disk").tag(true)
+                    Text("Unlimited (a plain folder)").tag(false)
+                }
+                .pickerStyle(.radioGroup)
+                .disabled(model.defaultStorageGB == nil)
+                if ownDisk {
+                    StorageSizeField(sizeGB: $sizeGB, range: sizeRange)
+                    if !sizeValid {
+                        Text("Choose \(sizeRange.lowerBound)–\(sizeRange.upperBound) GB.").font(.caption).foregroundStyle(.red)
+                    }
+                }
+            } footer: {
+                Text(ownDisk
+                     ? "Windows sees C: as a \(sizeGB) GB drive and the bottle can never take more. The disk image only uses the space actually written; resize it later on the bottle page."
+                     : "The bottle grows as far as this Mac's disk allows.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
-        .frame(width: 420)
-        .onAppear { runtimeName = model.preferredRuntime }
+        .frame(width: 440)
+        .onAppear {
+            runtimeName = model.preferredRuntime
+            ownDisk = model.defaultStorageGB != nil
+            sizeGB = model.defaultStorageGB ?? BottleStorage.defaultGB
+        }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button("Cancel") { dismiss() }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Create") {
-                    model.createBottle(name: name, runtime: runtimeName, graphics: graphics)
+                    model.createBottle(name: name, runtime: runtimeName, graphics: graphics,
+                                       storageGB: ownDisk ? sizeGB : nil)
                     dismiss()
                 }
-                .disabled(name.isEmpty || nameError != nil)
+                .disabled(name.isEmpty || nameError != nil || !sizeValid)
             }
         }
     }

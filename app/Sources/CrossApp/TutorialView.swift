@@ -232,7 +232,7 @@ struct TutorialView: View {
 
     private var bottleStep: some View {
         page {
-            Text("A bottle is a self-contained Windows: its own C: drive, settings and installed programs. Each bottle has a graphics backend (D3DMetal or wined3d) you can switch any time. Keep Steam in one bottle and experiments in another; deleting a bottle removes everything in it.")
+            Text("A bottle is a self-contained Windows: its own C: drive, settings and installed programs. Each bottle has a graphics backend (D3DMetal or wined3d) you can switch any time, and its own disk of a size you choose (64 GB to start; it only takes the space actually used and can be resized on the bottle page). Keep Steam in one bottle and experiments in another; deleting a bottle removes everything in it.")
             if model.project == nil {
                 box {
                     Label(model.loadError ?? "Gamify could not find its runtime. See Settings.", systemImage: "exclamationmark.triangle")
@@ -290,6 +290,10 @@ struct TutorialView: View {
                 Text("Graphics").frame(width: 70, alignment: .trailing)
                 Text("D3DMetal 3.0")
             }
+            HStack {
+                Text("Disk").frame(width: 70, alignment: .trailing)
+                Text(model.defaultStorageGB.map { "\($0) GB of its own" } ?? "a folder (no size limit)")
+            }
             Text("Setting up the C: drive takes about 40 seconds. The + button in the main window offers the other options.")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Create Bottle", action: createBottle)
@@ -299,7 +303,7 @@ struct TutorialView: View {
 
     private func createBottle() {
         guard model.newBottleNameError(newName) == nil, !newName.isEmpty else { return }
-        guard let job = model.createBottle(name: newName, graphics: .d3dmetal) else { return }
+        guard let job = model.createBottle(name: newName, graphics: .d3dmetal, storageGB: model.defaultStorageGB) else { return }
         winebootJob = job
         choice = .existing(newName)
     }
