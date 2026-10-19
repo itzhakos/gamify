@@ -231,13 +231,15 @@ public enum Programs {
     /// Runs after an installer: shortcuts it created show up in `list` by themselves.
     /// When it created none, the exes it added under Program Files are stored as
     /// `.installed` entries instead (at most three, shallowest first, no uninstallers,
-    /// updaters or crash reporters). Returns the new programs either way.
+    /// updaters or crash reporters; windowed programs only, unless the install added
+    /// nothing but console tools). Returns the new programs either way.
     @discardableResult
     public static func recordInstall(since before: Snapshot, in bottle: Bottle) -> [Program] {
         let newShortcuts = scanShortcuts(in: bottle).filter { !before.shortcuts.contains($0.id) }
         if !newShortcuts.isEmpty { return newShortcuts }
         let skip = ["unins", "uninst", "update", "crash", "report", "helper", "setup", "install", "service"]
-        let added = programFilesExecutables(in: bottle).subtracting(before.executables)
+        // the real spelling from disk, not the lower-cased key
+        let candidates = programFilesExecutables(in: bottle).subtracting(before.executables)
             .filter { path in
                 let name = (path as NSString).lastPathComponent
                 return !skip.contains { name.contains($0) }
@@ -246,16 +248,27 @@ public enum Programs {
                 let da = a.split(separator: "/").count, db = b.split(separator: "/").count
                 return da == db ? a < b : da < db
             }
-            .prefix(3)
+            .compactMap { realURL(relative: $0, in: bottle.driveC) }
+        let windowed = candidates.filter { isWindowsGUI($0) }
         var programs: [Program] = []
-        for rel in added {
-            // the real spelling from disk, not the lower-cased key
-            guard let url = realURL(relative: rel, in: bottle.driveC) else { continue }
+        for url in (windowed.isEmpty ? candidates : windowed).prefix(3) {
             let program = Program(name: url.deletingPathExtension().lastPathComponent,
                                   exe: windowsPath(of: url, in: bottle), source: .installed)
             if (try? add(program, to: bottle)) != nil { programs.append(program) }
         }
         return programs
+    }
+
+    /// True for a PE image with the Windows GUI subsystem (2), false for console tools.
+    static func isWindowsGUI(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? handle.close() }
+        guard let head = try? handle.read(upToCount: 4096), head.count > 0x40 else { return false }
+        let b = [UInt8](head)
+        let pe = Int(b[0x3C]) | Int(b[0x3D]) << 8 | Int(b[0x3E]) << 16 | Int(b[0x3F]) << 24
+        let subsystem = pe + 24 + 68   // optional header + 68, the same for PE32 and PE32+
+        guard pe > 0, subsystem + 1 < b.count, b[pe] == 0x50, b[pe + 1] == 0x45 else { return false }
+        return (Int(b[subsystem]) | Int(b[subsystem + 1]) << 8) == 2
     }
 
     /// Finds `rel` (lower-cased, '/'-separated) under `root` with the names as stored on disk.
