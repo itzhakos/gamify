@@ -53,6 +53,12 @@ cli/Sources/CrossCore/
                    bootstrap check (isBootstrapped, webhelperLog)
   SteamStatus.swift  Steam.status(in:): the bottle's Steam processes (libproc) + the newest
                    state of logs/connection_log.txt, and stuckReason (see "Steam status")
+  Store.swift      Store model (Steam, Epic, GOG Galaxy, Battle.net): installer source and
+                   cache, silent install, launcher, workarounds, running check; storeInstaller,
+                   storeLaunch, installer (any .exe/.msi); CLI helpers runLogged,
+                   bootstrapSteamWaiting (see "Stores and programs")
+  Programs.swift   the Programs list: .lnk parser (ShellLink), Start Menu/Desktop scan,
+                   programs.json, snapshot + recordInstall after an installer
   Process.swift    execReplacing / runWaiting / Invocation / spawnDetached / Termination
   Updater.swift    self-update: latest.json check, download + SHA-256, staging, detached
                    install helper (docs/updates.md)
@@ -64,8 +70,11 @@ cli/Sources/cross/main.swift      argument parsing + printing only
 app/Sources/CrossApp/
   CrossApp.swift   App, AppDelegate (files opened with the app), sidebar, New Bottle sheet
   AppModel.swift   bottles, jobs (processes started from the app), all actions
-  BottleView.swift bottle page: Disk row, actions, graphics picker, process list, log;
-                   StorageSheet (Change… / Move to a Disk Image…), StorageSizeField
+  BottleView.swift bottle page: Disk row, actions, graphics picker, Stores box (Steam row
+                   with its status), process list, log; StorageSheet, StorageSizeField
+  AppModel+Stores.swift  installStore / launchStore, installProgram / addProgram /
+                   removeProgram / launchProgram, refreshStoresAndPrograms, InstallPrompt
+  ProgramsView.swift  the Programs box (list, Install a Program…, Add a Program… sheet)
   LogView.swift    NSTextView that tails the selected job's log file
   SettingsView.swift  General tab (tutorial), Environment tab (= `cross env`), Paths tab
   TutorialView.swift  first-run tutorial window (six steps, see below)
@@ -185,8 +194,8 @@ For a Finder-like launch from a terminal:
   Its code path is the same as drag-drop/`open -a`, which was verified.
 - Only the winecx runtime is driven, same as the CLI. Bottles on gptk/wine11/sikarugir
   are shown read-only.
-- No program library or shortcuts (.lnk scanning, icons), no winetricks/DLL overrides
-  UI, no per-bottle env overrides (WINEDEBUG, MTL_HUD_ENABLED etc. come only from the
+- Program list since 2026-10-20 (see "Stores and programs"); still no icons, no
+  winetricks/DLL overrides UI, no per-bottle env overrides (WINEDEBUG, MTL_HUD_ENABLED etc. come only from the
   app's environment), no app icon.
 - The job list is in memory only; logs stay on disk. A game started by Steam is
   Steam's child, not a job, so use Kill Bottle for it.
@@ -513,3 +522,130 @@ takes ~17 s plus the comparison. The tree comparison checks paths, kinds, sizes 
 symlink targets, not file contents (ditto is trusted for the bytes). Clicking through
 the sheets by hand was not done (no UI automation access); their actions were exercised
 through the same AppModel calls.
+
+
+## Stores and programs (2026-10-20)
+
+![bottle page with the Stores and Programs boxes](screenshots/bottle-stores-programs.png)
+
+### Stores
+`Store` (cli/Sources/CrossCore/Store.swift) describes a launcher: official installer source
+and its cache in `downloads/<id>/`, unattended install arguments, the launcher exe under C:
+(first existing of a list), launch arguments, registry workarounds (written with regedit before
+the install and before every launch), folders of stale locks to empty before a launch, the exe
+names that mean "running" (a libproc scan of the bottle, as for Steam), plain-English notes and
+a known issue. `Store.all` = steam, epic, gog, battlenet. Steam is in the list for the CLI and
+the UI, but its install and launch keep their own code paths (`isSteam`): `steamInstaller` +
+the bootstrap chain, `Runtime.steam` with the shim and `-noverifyfiles -no-cef-sandbox`,
+`Steam.status`, Restart Steam; none of that changed.
+
+| Store | Installer (checked 2026-10-19) | Install | Launcher | Workarounds | Result |
+|---|---|---|---|---|---|
+| Steam | `cdn.cloudflare.steamstatic.com/client/installer/SteamSetup.exe` | `/S` + bootstrap chain | `Program Files (x86)/Steam/steam.exe` | shim, flags (unchanged) | sign-in window |
+| Epic Games Store | `launcher-public-service-prod06.ol.epicgames.com/launcher/api/installer/download/EpicGamesLauncherInstaller.msi` (303 to EpicInstaller-20.3.3.msi, 264 MB) | `msiexec /i … /passive /norestart`, 28 s | `Program Files/Epic Games/Launcher/Portal/Binaries/Win64/EpicGamesLauncher.exe -SkipBuildPatchPrereq` | none needed | first start self-updates (EpicGamesUpdater window, restart with -ForcedRestart), then **"Sign in to Epic Games" renders** ([screenshot](screenshots/store-epic-signin.png)) |
+| GOG Galaxy | URL read from `remote-config.gog.com/components/webinstaller?component_version=2.0.0` (`content.windows.downloadLink`, now `content-system.gog.com/open_link/download?path=/open/galaxy/client/setup_galaxy_2.1.10.56.exe`, 342 MB, MD5 as published); that URL is also the fallback | Inno Setup `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`, 17-27 s | `Program Files/GOG Galaxy/GalaxyClient.exe` | `GalaxyOverlay.exe` disabled (CrossOver 25's profile); `ProgramData/GOG.com/Galaxy/lock-files` emptied before a launch | **launcher opens but its window stays blank** ([screenshot](screenshots/store-gog-blank.png)); its log says the login page loaded |
+| Battle.net | `downloader.battle.net/download/getInstaller?os=win&installer=Battle.net-Setup.exe` (302 to `…/installer/win/1.0.66/Battle.net-Setup.exe`, 4.9 MB) | `--lang=enUS --installpath=C:\Program Files (x86)\Battle.net`; hands-off, 45 s, no clicks | `Program Files (x86)/Battle.net/Battle.net Launcher.exe` | `systemsurvey.exe` disabled (CrossOver 25's profile) | **launcher opens "Battle.net Login" but shows only its spinner** ([screenshot](screenshots/store-battlenet-spinner.png)) |
+
+Install flow (CLI `cross store install`, app Install…): download once (via `<name>.part`),
+registry workarounds, run the installer with its output in a job log, wait. Most installers are
+done when they exit (GOG's starts Galaxy for a moment, which quits again, so "running" must not
+end the wait). Battle.net-Setup.exe exits after ~4 s and finishes from a copy of itself in
+`C:\ProgramData\Battle.net\Setup\bna_2` with its own progress window (`installerHandsOff`):
+its install is done when the launcher is installed and running (20 min limit). The app then
+launches a store that is not running yet; Battle.net starts itself.
+
+Quirks found (Wine 10 / CrossOver 25.1 lineage, winecx-full, D3DMetal):
+- **Epic**: works as is. The MSI installs the 64-bit launcher under `Program Files` (not x86).
+  Its CEF (Chrome 90, EpicWebHelper.exe) renders through D3DMetal.
+- **GOG Galaxy 2.1.10** is Qt 6 + Qt WebEngine. Its in-process Chromium GPU path runs ANGLE on
+  D3D11; Wine's d3dcompiler_47 fails Skia's shaders (`E5005: Function "isinf" is not defined`).
+  With Microsoft's d3dcompiler_47.dll in system32 (what CrossOver's "Game Launcher
+  Dependencies" fetch from github.com/mozilla/fxc2) the shader errors are gone, but the window
+  still stays blank. Also tried without success: `QTWEBENGINE_CHROMIUM_FLAGS=--disable-gpu`
+  (Galaxy ignores it; the env reaches the process), `--disable-gpu` as an argument,
+  `QT_QUICK_BACKEND=software`, `QT_D3D_NO_FLIP=0`, `QSG_RHI_BACKEND=opengl` (crashes), and the
+  bottle on wined3d (ANGLE then needs GLES 3, gets 2: "too few uniforms", white window). So the
+  native DLL is not shipped. After a kill the next start finds its own lock file
+  (`GalaxyClient.exe-galaxy-client.lock`), logs "Second client instance detected" and quits;
+  `storeLaunch` empties the folder first (verified: kill, launch, window back).
+- **Battle.net 2.53** (`Battle.net.exe` and its libcef.dll are 32-bit, so D3DMetal, which is
+  x86_64 only, does not apply): ANGLE D3D11 on Wine's 32-bit wined3d fails ("No available
+  renderers"), the GLES 2 fallback is refused, SwiftShader-Vulkan lacks `VK_KHR_win32_surface`,
+  and a CEF child dies with a breakpoint (winedbg "Program Error" dialog). Setting
+  `"HardwareAcceleration": "false"` and `"QtHardwareAcceleration": "false"` in
+  `AppData/Roaming/Battle.net/Battle.net.config` moves CEF to `--use-gl=disabled
+  --disable-gpu-compositing` but the login still does not appear, so it is not applied.
+  Lutris installs Battle.net with DXVK; a 32-bit DXVK over MoltenVK would be the next thing to try.
+- CrossOver 25's crossover.tie profiles (downloads/crossover/…/share/crossover/data/crossover.tie)
+  for all three: a "Game Launcher Dependencies" component (core fonts, VC++ 2015-2022 x64,
+  d3dcompiler_47 from mozilla/fxc2, Asian fonts, msync) plus the per-store overrides above.
+  Epic's and GOG's installers bring their own VC++ runtimes; nothing else of the component
+  was needed for what is verified here.
+
+### Programs
+`Programs.list(in:)`: every `.lnk` under `ProgramData/Microsoft/Windows/Start Menu/Programs`,
+the user's `AppData/Roaming/Microsoft/Windows/Start Menu/Programs`, `users/Public/Desktop` and
+the user's Desktop whose target is an existing .exe (no uninstallers, no store launchers:
+Steam started without its flags would undo the shim), plus `programs.json` next to cross.json:
+
+```json
+{"programs": [{"name": "7zFM", "exe": "C:\\Program Files\\7-Zip\\7zFM.exe", "arguments": "", "source": "installed"}],
+ "hidden": ["c:\\program files\\7-zip\\7zg.exe|"]}
+```
+
+(kept apart from cross.json so program edits and bottle settings never touch each other;
+`source` is `installed` or `manual`; `hidden` = shortcuts removed from the list, the .lnk stays).
+The `.lnk` parser (`ShellLink`, [MS-SHLLINK]) takes the target from LinkInfo's local base path
+(+ common path suffix; Wine writes only that, no ID list), else from the environment-variable
+block, and reads the arguments. NSIS counts a terminating NUL in the arguments string (Steam's
+shortcut has `"\0"` as arguments), so strings are trimmed. Windows paths map to unix through
+`dosdevices/<drive>:`; launching is `runExe` (cwd = the exe's folder), arguments split like a
+Windows command line.
+
+After an installer (`cross install`, Install a Program…), `Programs.recordInstall` compares a
+snapshot taken before it ran: new shortcuts show up by themselves; when there is none, the
+windowed (PE subsystem 2) exes it added up to four levels below Program Files / Program Files
+(x86) are stored as `installed` entries (at most three, shallowest first, no uninstallers,
+updaters, crash reporters, setup or service exes).
+
+App: the Programs box beside Stores, with Launch and Remove per entry, **Install a Program…**
+(an open panel for .exe/.msi in ~/Downloads; .msi runs as `msiexec /i`) and **Add a Program…**
+(an exe inside the bottle's C:, then a small sheet for name and arguments). Files opened with
+the app or dropped on the page: an .msi or an .exe whose name contains setup/install gets the
+alert "Install <file>?" with Install / Just Run / Cancel ([screenshot](screenshots/install-prompt.png));
+other .exe files run as before.
+
+### CLI
+```
+cross store list [<bottle>]                 stores, notes, known issues; installed/running in <bottle>
+cross store install <bottle> <store>        download (once), workarounds, silent install, wait
+cross store launch  <bottle> <store> [args] steam = cross steam; others: workarounds, locks, exe
+cross install <bottle> <installer.exe|.msi> [args]   then prints the programs it added
+cross programs <bottle>                     list (name, source, exe, arguments)
+cross programs <bottle> launch <name> [args] | add <exe> [--name N] [args] | remove <name>
+```
+`cross store install <bottle> steam` runs SteamSetup.exe /S and then the same first start the
+app does (`bootstrapSteamWaiting`: steam.exe without -noverifyfiles until the webhelper is
+there, -shutdown, wineserver -w), so the CLI no longer leaves a bootstrapper that hits
+"Steam - Fatal Error" on `cross steam`. Installer and bootstrap output goes to
+`~/Library/Logs/Gamify/<bottle>/`, like the app's jobs. `cross steam` is unchanged.
+
+### Verified (2026-10-19/20, test bottles in the checkout's bottles/, winecx-full, 16 GB images, all deleted afterwards)
+| Check | Command / action | Result |
+|---|---|---|
+| Epic, CLI | `cross store install gs-epic epic` (cache empty) | downloaded 264 MB in 3 s, installed in 28 s; `cross store launch`: updater, then "Sign in to Epic Games" ~1.5 min after the launch |
+| GOG, CLI | `cross store install gs-gog gog` (cache empty) | URL from the remote config, 342 MB in 5 s, installed in 22 s, override in the registry; launch: window "GOG GALAXY" 25 s later, blank; log "Showing login form"; kill + launch: stale lock cleared, window back |
+| Battle.net, CLI | `cross store install gs-bnet battlenet` | 4.9 MB, hands-off install 45 s, "Battle.net Login" with spinner; `cross store launch` after a kill: same window 10 s later |
+| Steam, CLI | `cross store install gs-steam steam` | setup + client bootstrap + shutdown in 48 s; `cross store launch gs-steam steam` and later `cross steam gs-steam`: "Sign in to Steam" in 10 s, webhelper_real with `--disable-gpu --single-process` |
+| Program, CLI | `cross install gs-prog downloads/programs/7z2301-x64.exe /S` (7-Zip 23.01 from www.7-zip.org) | 2 s, "new program: 7-Zip File Manager (shortcut)"; `cross programs gs-prog launch "7-Zip File Manager"` opened 7-Zip ([screenshot](screenshots/program-7zip.png)) |
+| no-shortcut fallback | same install with both Start Menu folders made read-only | 7zFM and 7zG stored as `installed` (7z.exe, a console tool, skipped); `remove 7zG`, `add … --name "7-Zip at C:" 'C:\'` listed as `manual` |
+| App, Steam | Install Steam in fresh `gs-app` | the unchanged chain steam-setup → steam-bootstrap → steam-shutdown → wineserver-w → steam, "Sign in to Steam" 61 s after the start |
+| App, stores | Install… for Epic, GOG, Battle.net; Launch for Steam and Epic | Epic: epic-setup 26 s then launched, sign-in rendered; GOG: gog-setup 52 s then the `gog` launch job, Galaxy window; Battle.net: battlenet-setup, then running; the rows' dots and states followed (screenshot above) |
+| App, programs | Install a Program (7-Zip, /S), Launch from the list, an opened `7z2301-setup.exe` | 7-Zip File Manager listed and launched; the Install / Just Run alert appeared |
+
+The app actions were driven through the same AppModel calls the buttons make, from a temporary
+launch hook in a test copy of the app (own bundle id), not committed: System Events sees no
+windows of the app on this machine (no assistive access), so clicks could not be scripted. The
+alert's buttons and the open panels were therefore not clicked; Install / Just Run call
+`installProgram` / `runExe`, which were exercised directly. Signing in was not attempted
+(no accounts), so nothing after a login (game installs from the stores) is verified.
