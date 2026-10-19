@@ -46,6 +46,9 @@ cli/Sources/CrossCore/
   Project.swift    root lookup (CROSS_ROOT, walk up from the binary, then the cwd)
   Runtime.swift    winecx + D3DMetal environment (= scripts/winecx-env.sh)
   Bottle.swift     bottles/<name>, cross.json + .runtime fallback, list/load/save
+                   (image-backed bottles are mounted here, see "Disk allocation")
+  Storage.swift    per-bottle disk images: DiskImage (hdiutil), mount/unmount, resize,
+                   move to/from an image, delete, requireIdle (see "Disk allocation")
   Steam.swift      webhelper shim, ActiveProcess reset, lock cleanup, installer location,
                    bootstrap check (isBootstrapped, webhelperLog)
   SteamStatus.swift  Steam.status(in:): the bottle's Steam processes (libproc) + the newest
@@ -61,7 +64,8 @@ cli/Sources/cross/main.swift      argument parsing + printing only
 app/Sources/CrossApp/
   CrossApp.swift   App, AppDelegate (files opened with the app), sidebar, New Bottle sheet
   AppModel.swift   bottles, jobs (processes started from the app), all actions
-  BottleView.swift bottle page: actions, graphics picker, process list, log
+  BottleView.swift bottle page: Disk row, actions, graphics picker, process list, log;
+                   StorageSheet (Change… / Move to a Disk Image…), StorageSizeField
   LogView.swift    NSTextView that tails the selected job's log file
   SettingsView.swift  General tab (tutorial), Environment tab (= `cross env`), Paths tab
   TutorialView.swift  first-run tutorial window (six steps, see below)
@@ -211,7 +215,7 @@ no paths of the checkout, no Wine jargon.
 |---|---|---|
 | 1 Welcome | What Cross is (Wine + D3DMetal, through Rosetta), what works (DX9–12, Steam, plain .exe) and what does not (kernel anti-cheat, drivers). | – |
 | 2 Rosetta 2 | Why it is needed. | Installed (`Runtime.rosettaAvailable`): green check. Missing: **Install Rosetta 2…** runs `softwareupdate --install-rosetta --agree-to-license` through `NSAppleScript` "with administrator privileges" (the standard macOS password dialog), then `Runtime.recheckRosetta()`; when that returns true the tutorial moves on to the bottle step by itself. Also the command with Copy and **Check Again** buttons for a Terminal install. |
-| 3 Bottles | What a bottle is. | No drivable bottle: "Create your first bottle" (name field, default `games`/`games2`…, runtime = `Runtime.preferred`, D3DMetal; the runtime line is hidden when only one runtime is available). Bottles exist: a popup to pick one (with "Steam installed" hints) or "Create a new bottle". **Create Bottle** calls `AppModel.createBottle` and shows the wineboot job's status line and log inline. Rosetta or runtime missing: a warning instead of the form. |
+| 3 Bottles | What a bottle is (including its own disk of a chosen size, 64 GB to start). | No drivable bottle: "Create your first bottle" (name field, default `games`/`games2`…, runtime = `Runtime.preferred`, D3DMetal, disk = `Runtime.defaultStorageGB`; the runtime line is hidden when only one runtime is available). Bottles exist: a popup to pick one (with "Steam installed" hints) or "Create a new bottle". **Create Bottle** calls `AppModel.createBottle` and shows the wineboot job's status line and log inline. Rosetta or runtime missing: a warning instead of the form. |
 | 4 Steam | What Install Steam does (installer, first start with the 1.7 GB client download and a black window, restart, sign-in window; Cross never sees the password). | Bottle from step 3 with no Steam: **Install Steam** (disabled while its wineboot still runs) = `AppModel.installSteam`, then the step shows the latest job's status and log while `steamSetup` contains the bottle. Steam installed: "already installed" (or "installed, sign in" when started from the tutorial) with a Launch Steam button. No bottle chosen: a hint. |
 | 5 Run a game | Launch Steam, Run .exe…, drag-and-drop / open with Cross; graphics picker, winecfg/cmd/Explorer, Kill Bottle. | – |
 | 6 Where things live | Bottles (`Project.bottles`), Logs (`~/Library/Logs/Cross`), Downloads (`Project.downloads`), each with a Show-in-Finder button; Settings (SettingsLink). Finish. | Paths come from the located project, so a bundled app shows Application Support, not a checkout. |
@@ -377,3 +381,135 @@ Found on the way:
 - The user was clicking in the app during the first run (Restart Steam twice, Kill Bottle
   twice, windows moved between displays), which produced overlapping job chains in the
   logs of 13:45-13:49; nothing in them is a bug of the chain itself.
+
+## Disk allocation (2026-10-19)
+
+A bottle can get its own disk of a chosen size, like a VM's virtual disk, instead of a
+folder that grows without limit. New bottles get one by default (64 GB, or the free
+space when the disk has less); existing bottles stay plain folders and load unchanged.
+
+### Design
+
+An image-backed bottle `foo` is an APFS sparse bundle next to its mount point:
+
+```
+bottles/foo.sparsebundle      hdiutil create -type SPARSEBUNDLE -fs APFS -size 64g -volname foo
+                              + hdiutil resize -size 64g (a fresh image's volume is ~200 MB
+                                short of -size; after the resize it is exactly 64 GiB)
+bottles/foo/                  hdiutil attach -nobrowse -noautoopen -mountpoint bottles/foo
+                              (not in Finder's sidebar, no window). While unmounted it holds
+                              only .gamify-disk-image (the image's file name), written by
+                              every mount, so a missing image is reported, not shown as an
+                              empty folder bottle
+bottles/foo/cross.json        inside the volume, as before, plus
+                              "storage": {"image": "foo.sparsebundle", "sizeGB": 64}
+bottles/foo/.metadata_never_index   keeps Spotlight off the volume (it would hold it busy)
+```
+
+- A bottle is image-backed exactly when `bottles/<name>.sparsebundle` exists; nothing else
+  needs to be stored to find it (no sidecar file inside the bundle). The volume's own
+  size (statfs) is the live value shown everywhere; `storage.sizeGB` records what was set.
+- Sparse: the image takes only what was written (a fresh bottle: 1.7 GB). Deleting files
+  inside the bottle does not shrink it by itself; `hdiutil compact` (run by every resize,
+  also "resize" to the same size) gives the space back (0.2 s, reclaimed 8.2 GB in a test).
+- Windows sees C: (drive_c on the volume) as a drive of the allocated size:
+  `GetDiskFreeSpaceExW("C:\\")` = 10.00 GB for a 10 GB bottle, and a write past the end
+  fails with ERROR_DISK_FULL (112). Wine's `fsutil` has no `volume diskfree` and WMI's
+  `Win32_LogicalDisk.Size` is a constant (82252800000 for every drive); `dir C:\` shows
+  the real free bytes.
+- Units: whole GiB, called GB as hdiutil (`64g`) and Windows do. Minimum 8 GB, maximum
+  what the bottle already uses plus the free space of the disk the image is on
+  (`volumeAvailableCapacityForImportantUsage`, which counts purgeable space as Finder does:
+  358 GB here while `df` said 51 GB).
+- Mounting is lazy: `Bottle.load` and `Bottle.list` attach an image whose mount point is
+  not a mount point (statfs `f_mntonname` == realpath of the prefix), so the CLI and the app
+  work after a reboot or an `hdiutil detach`. `Bottle.list` shows image bottles even when
+  they cannot be mounted (`Bottle.storageError`); the app shows an error page with Try
+  Again, `cross bottle list` an "unavailable: …" column.
+- Failure modes handled: image missing (marker left, error names the image); attach fails
+  (error from hdiutil); image already mounted elsewhere (found with `hdiutil info -plist`,
+  ejected and mounted at the bottle; if that eject fails because something uses it, the
+  error says where it is mounted); files in the unmounted mount point (refused, they would
+  be hidden under the volume).
+
+### Operations (CrossCore `Storage.swift`, used by the CLI and the app)
+
+| Operation | Steps |
+|---|---|
+| create (`createBottle(name:config:storageGB:)`) | range check, image create + resize, marker, attach, cross.json, then wineboot as before |
+| resize (`resizeStorage`) | `requireIdle`, check the range (shrink only to at least the used space, rounded, plus 1 GB), detach, `hdiutil resize -limits` minimum when shrinking, `hdiutil resize -size Ng`, `hdiutil compact`, attach (also after a failed resize), update `storage.sizeGB` |
+| folder -> image (`moveToImage`) | `requireIdle`, measure the folder, need its size + 1 GB free, create the image and attach it at `bottles/.<name>.moving`, `ditto` (keeps dosdevices symlinks, modes, xattrs), compare both trees (every relative path with kind, file size and symlink target), detach, rename the folder to `bottles/.<name>.folder`, mount the image at the bottle, write `storage`, remove the backup. A failure before the swap removes the image and leaves the folder untouched; after it, the folder is put back |
+| image -> folder (`moveToFolder`) | `requireIdle`, `ditto` the volume into `bottles/.<name>.moving`, compare, eject, move the image aside, swap the folder in, drop `storage`, delete the image |
+| delete (`deleteBottle`) | `wineserver -k` (+ `-w` for images), eject (forced if need be), remove the image and the mount point |
+
+`requireIdle` refuses while Windows programs run in the bottle: processes whose cwd is in
+the prefix (`Steam.bottleProcesses`) and, for programs started from elsewhere (a `cross
+cmd` from a shell keeps the shell's cwd), the bottle's wineserver answering on
+`/tmp/.wine-<uid>/server-<dev>-<inode>/socket` (connect succeeds only while it runs). A
+server that only lingers after its last program is waited for up to 10 s (it writes the
+registry files when it exits, so the volume must not be ejected under it).
+
+hdiutil notes (macOS 27.0.1): every `hdiutil create/attach/detach/resize` prints a warning
+that it is deprecated in favour of `diskutil image …`, and still works; CrossCore filters
+the warning out of error messages. `hdiutil resize` on an attached image fails with
+"Resource temporarily unavailable (35)", by path and by /dev/disk, hence detach first; it
+takes ~0.4 s and the APFS container and volume follow (grow and shrink). Attaching an image
+that is attached at another mount point fails with "Resource busy"; at the same mount point
+it is a no-op. All of it runs as the normal user (no sudo).
+
+### CLI
+
+```
+cross bottle create <name> [--storage <GB>|unlimited]   (default 64 GB, capped by free space)
+cross bottle set <name> storage <GB>      resize an image bottle, or move a folder bottle into a new image
+cross bottle set <name> storage unlimited move an image bottle back into a folder
+cross bottle set <name> --storage <GB>    same
+cross bottle list                         last column: folder (no limit) | image 1.7 GB used of 10.0 GB | unavailable: …
+cross bottle delete <name>                also ejects and removes the image
+```
+
+### App
+
+- **New Bottle sheet**: a Disk section with "Its own disk" (default) / "Unlimited (a plain
+  folder)" and a Size row (slider over the allowed range, whole-GB field, stepper). Create
+  is disabled outside the range. With less than 8 GB free only the folder is offered.
+- **Bottle page**: a Disk row under the header. Image bottles: a bar with used / allocated
+  and free ("1.7 GB of 10.0 GB used, 8.3 GB free"; orange above 75 %, red above 90 %),
+  refreshed with the Steam status every 3 s (`AppModel.refreshStorage`), and **Change…**.
+  Folder bottles: "Folder, no size limit · N GB free on this Mac" and **Move to a Disk
+  Image…**. While an operation runs the row shows its step ("Creating a 9 GB disk image…",
+  "Copying 3.2 GB of 11 GB…", "Verifying the copy…"), the sidebar shows the spinner, the
+  action buttons are disabled and `AppModel.start` refuses launches in that bottle.
+- **StorageSheet** (Change… / Move to a Disk Image…): the current use, the Size row, Resize
+  or Move, and for image bottles **Move to a Folder (no size limit)**.
+  `AppModel.setStorage` refuses with an alert while jobs, Windows processes or the
+  bottle's wineserver run ("Quit them (or use Kill Bottle)"), then runs the CrossCore
+  operation off the main thread.
+- Sidebar subtitle: `winecx · d3dmetal · 10 GB` for image bottles, "disk image
+  unavailable" when it cannot be mounted. Delete Bottle goes through `Runtime.deleteBottle`.
+
+### Verified (2026-10-19, CROSS_BOTTLES in a scratch dir, runtimes from the checkout)
+
+| Check | Result |
+|---|---|
+| `cross bottle create st10 --storage 10` | image + wineboot in 18 s; `bottle list`: image 1.7 GB used of 10.0 GB; bundle 1.7 GB on disk |
+| Windows' view | `GetDiskFreeSpaceExW`: C: total 10.00 GB (10737418240 bytes), free 8.27 GB; `dir C:\`: 8,884,961,280 bytes free |
+| write past the end | a test exe writing 9 GB to C:\big.bin: "WriteFile failed after 8.23 GB: error 112 (ERROR_DISK_FULL)"; the bottle kept working |
+| grow | `cross bottle set st10 --storage 20`: 1.2 s, Windows C: total 20.00 GB |
+| shrink | to 5: "below the minimum of 8 GB"; with 7.7 GB used, to 8: "below the minimum of 9 GB"; to 12: done, C: 12.00 GB; same size again: compacted 7.8 -> 1.7 GB on disk |
+| busy | resize while `cross cmd st10 /c ping -n 25 …` ran (cwd outside the prefix): refused after 10 s ("its wineserver is still up"); afterwards it worked |
+| reboot simulation | `hdiutil detach bottles/st10`, then `cross cmd st10 /c ver`: remounted, Windows 10.0.19043 |
+| mounted elsewhere | `hdiutil attach -mountpoint elsewhere`: list ejected it and remounted at the bottle; with a shell cd'd into it: listed "unavailable: … already mounted at … cannot be ejected (… Resource busy)"; next list after the shell left: fine |
+| stray files / missing image | a file in the unmounted mount point: refused with its name; image moved away: "the disk image of 'st10' (st10.sparsebundle) is missing"; moved back: fine |
+| folder -> image -> folder | 1.7 GB folder bottle `fb` to a 9 GB image (7.6 s), C: 9.00 GB, exes ran; back to a folder (5 s), runs, cross.json without `storage`, nothing attached. A 5.7 GB folder bottle (4 GB payload) to a 12 GB image: 8.6 s, payload intact, C: 12.00 GB |
+| delete | image bottle, image bottle mounted elsewhere, folder bottle: nothing left in bottles/, `hdiutil info` and `mount` show nothing |
+| existing bottles | checkout `steamtest` (folder, 21 GB) and the 0.3 app's `Steam` bottle list as "folder (no limit)"; `cross cmd steamtest /c ver` runs; steamtest's cross.json byte-identical |
+| app | `app/build.sh` builds; New Bottle sheet, bottle page (image and folder), StorageSheet, a move and a resize driven through `AppModel.setStorage`, the unavailable-image page and Delete Bottle checked with window screenshots (a test copy with its own bundle id, sheets opened by a temporary launch hook that is not committed) |
+
+Not verified: converting a bottle above ~6 GB (the cx-sized 11 GB case). The Mac had
+25 GB free during the test while the user's Steam download was filling the disk, so the
+21 GB `steamtest` copy was not attempted; at the measured ~0.7 GB/s an 11 GB bottle
+takes ~17 s plus the comparison. The tree comparison checks paths, kinds, sizes and
+symlink targets, not file contents (ditto is trusted for the bytes). Clicking through
+the sheets by hand was not done (no UI automation access); their actions were exercised
+through the same AppModel calls.

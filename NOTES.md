@@ -1,6 +1,6 @@
 # Cross — notes
 
-## Current state (2026-10-17)
+## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
 - **Runtime**: `runtimes/winecx` (CrossOver 25.1 Wine 10.0, x86_64 under Rosetta, built by
   `scripts/build-winecx-deps.sh` + `scripts/build-winecx.sh`) and `runtimes/winecx-full`
@@ -16,7 +16,19 @@ What is live, in one place; everything below it is the chronological log (dead e
   `app/build.sh`). `scripts/winecx-env.sh` is the shell reference for the environment;
   `scripts/bottle.sh` was retired on 2026-10-17 (the CLI covers it).
 - **Steam**: needs `src/webhelper-shim` (built with `make`) and `-noverifyfiles -no-cef-sandbox`.
+- **Disk allocation** (2026-10-19, branch claude/storage-allocation): a bottle can live in its
+  own APFS sparse bundle `bottles/<name>.sparsebundle` mounted (`hdiutil attach -nobrowse
+  -noautoopen -mountpoint`) at `bottles/<name>`, so Windows sees C: as a drive of the chosen
+  size (default 64 GB for new bottles, `--storage unlimited` / "Unlimited" = the old folder).
+  Lazy mount on load/list, resize (detach + `hdiutil resize` + `compact`), move folder <->
+  image (ditto + tree compare + swap), delete ejects. `cross bottle create --storage`,
+  `cross bottle set <name> storage <GB>|unlimited`; app: New Bottle sheet Disk section, Disk
+  row + Change… on the bottle page. Existing folder bottles unchanged. docs/app.md "Disk
+  allocation".
 - **Bottles**: `cx` (Steam signed in, Order of the Sinking Star at 60 fps) and `full` (winecx-full).
+  On 2026-10-19 the checkout's bottles/ held only `steamtest` (winecx-full, 21 GB, folder) and
+  the installed 0.3 app's ~/Library/Application Support/Gamify/bottles held `Steam` (folder,
+  created that day); cx, full and games were not on disk.
 - **Reference material**: `upstream/crossover-sources-25.1.0` (+ dep sources), `downloads/crossover`
   (CrossOver 25.1 trial, unpacked, CLI-driven), `src/patches/` (diff over Wine 10.0).
 - **Product name**: Gamify (2026-10-17, user's icon in app/icon/AppIcon.png); folder, `cross` CLI and
@@ -313,3 +325,4 @@ cleanup), `Process.swift` (execve / run-and-wait), `main.swift` (commands).
 - 2026-10-17 Portal 2 audio ticks = Wine dsound FIR resampler (44.1->48 kHz) built as x87 in our i386 PE DLLs, emulated slowly by Rosetta (50% of a core per buffer vs 1.5% with SSE). steamtest uses an SSE i386 dsound.dll (`scripts/dsound-sse.sh`); real fix = rebuild runtimes with i386_CFLAGS="-g -O2 -msse2 -mfpmath=sse". See docs/portal2-audio.md.
 - 2026-10-17 Worms W.M.D (Qt5 + OpenGL) startup crash = winemac.drv refused SetPixelFormat on Qt's message-only GL dummy window; also needs a 4.1 core context for GLSL 330 and vertex inputs bound in declaration order. All three fixed in `src/patches/winemac-qt5-opengl.patch` (options on by default for Worms W.M.D.exe), main menu verified; still open: WMV3/WMA Pro intro videos need FFmpeg/gst-libav in the runtime, otherwise the game stays black after the logos. See docs/worms-opengl.md.
 - 2026-10-17 WMV/WMA video (Worms W.M.D intros: WMV3 + WMA Pro) plays on winecx-full: minimal LGPL FFmpeg 6.1.6 (Windows Media decoders only) + gst-libav 1.24.2 in section 6 of scripts/build-winecx-full-deps.sh; winegstreamer picks avdec_wmv3/avdec_wmapro itself (winedmo/--with-ffmpeg is only a demuxer in Wine 10, no help). Worms started from Steam plays its logos and reaches the menu. See docs/runtime-full.md "Windows Media decoders" and docs/worms-opengl.md section 4.
+- 2026-10-19 Per-bottle disk allocation: image-backed bottles = `hdiutil create -type SPARSEBUNDLE -fs APFS -size <N>g -volname <name> bottles/<name>.sparsebundle` + `hdiutil resize -size <N>g` (without it the volume is ~200 MB short), mounted with `hdiutil attach -nobrowse -noautoopen -mountpoint bottles/<name>`; marker `.gamify-disk-image` under the mount point, cross.json `"storage": {"image","sizeGB"}` inside the volume. `hdiutil resize` fails on an attached image (EAGAIN), so resize = detach, resize, `hdiutil compact` (returns space freed inside the bottle, 0.2 s), attach; shrink only above use. Attaching an image that is attached elsewhere fails "Resource busy" (handled: eject, remount). Busy check = cwd scan + connect to /tmp/.wine-<uid>/server-<dev>-<ino>/socket. Verified with a test exe: C: total 10.00 GB in a 10 GB bottle, ERROR_DISK_FULL past the end, 20 GB after a resize, remount after detach, folder<->image moves (5.7 GB in 8.6 s). All of hdiutil prints "deprecated, use diskutil image" on macOS 27 and still works. See docs/app.md "Disk allocation".
