@@ -20,8 +20,9 @@ extension Runtime {
     }
 
     /// Creates bottles/<name> with its cross.json (and .runtime). The prefix itself is
-    /// initialised by running `wineboot(for:)` afterwards.
-    public func createBottle(name: String, config: BottleConfig) throws -> Bottle {
+    /// initialised by running `wineboot(for:)` afterwards. With `storageGB` the bottle
+    /// gets its own disk image of that size (Storage.swift); nil makes a plain folder.
+    public func createBottle(name: String, config: BottleConfig, storageGB: Int? = nil) throws -> Bottle {
         guard Runtime.isKnown(config.runtime) else {
             throw CrossError("cross only creates \(Runtime.known.joined(separator: "/")) bottles (unknown runtime '\(config.runtime)')")
         }
@@ -34,9 +35,23 @@ extension Runtime {
         guard !FileManager.default.fileExists(atPath: prefix.path) else {
             throw CrossError("bottle '\(name)' already exists at \(prefix.path)")
         }
-        try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
-        let bottle = Bottle(name: name, prefix: prefix, config: config)
-        try bottle.saveConfig()
+        guard let storageGB else {
+            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
+            let bottle = Bottle(name: name, prefix: prefix, config: config)
+            try bottle.saveConfig()
+            return bottle
+        }
+        try Runtime.checkSize(storageGB, in: Runtime.storageRange(project: project), what: "bottle '\(name)'")
+        let image = try createImage(for: name, prefix: prefix, sizeGB: storageGB)
+        var config = config
+        config.storage = BottleStorage(image: image.lastPathComponent, sizeGB: storageGB)
+        let bottle = Bottle(name: name, prefix: prefix, config: config, image: image)
+        do {
+            try bottle.saveConfig()
+        } catch {
+            try? Bottle.delete(bottle)
+            throw error
+        }
         return bottle
     }
 
