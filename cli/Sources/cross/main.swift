@@ -14,6 +14,15 @@ cross - bottle manager and launcher for the winecx runtimes
   cross cmd   <bottle> [args...]           run cmd.exe, e.g. cross cmd cx /c ver
   cross cfg   <bottle>                     open winecfg
   cross steam <bottle> [args...]           install the webhelper shim, clear stale locks, launch Steam
+  cross store list [<bottle>]              the stores cross can install (with their state in <bottle>)
+  cross store install <bottle> <store>     download the store's official installer, install it silently
+  cross store launch  <bottle> <store> [args...]   start an installed store (steam = cross steam)
+  cross install <bottle> <installer.exe|.msi> [args...]   run any installer in the bottle (.msi via
+                                           msiexec /i), then list the programs it added
+  cross programs <bottle>                  list the bottle's programs (Start Menu shortcuts + added ones)
+  cross programs <bottle> launch <name> [args...]
+  cross programs <bottle> add <exe> [--name <name>] [args...]
+  cross programs <bottle> remove <name>
   cross kill  <bottle>                     wineserver -k
   cross env   <bottle> [--export]          print the environment the bottle runs with
 
@@ -25,6 +34,11 @@ so Windows sees a C: drive of that size and it only takes the space actually wri
 resizes an image (shrinking only above what is used), moves a folder bottle into a new
 image, or with `unlimited` moves an image bottle back into a folder; none of these run
 while programs are running in the bottle. Images are mounted on demand (after a reboot).
+Stores: steam, epic (Epic Games Store), gog (GOG Galaxy), battlenet (Battle.net). Installers
+are cached in downloads/<store>/; install and installer output goes to
+~/Library/Logs/Gamify/<bottle>/. Programs: shortcuts are read from the Start Menu and Desktop
+folders of the bottle; entries added by hand (or found after an install that made no shortcut)
+are kept in bottles/<name>/programs.json.
 Runtimes: winecx (default) and winecx-full (same Wine + GStreamer, SDL2, MoltenVK),
 both in runtimes/; a bottle keeps the runtime it was created with.
 The project root is found by walking up from the binary (or set CROSS_ROOT).
@@ -180,6 +194,122 @@ func main() throws {
     case "steam":
         let (runtime, bottle) = try loadBottle(requireArg(args, 0, "bottle name"))
         execReplacing(try runtime.steam(in: bottle, arguments: Array(args.dropFirst())))
+
+    case "store":
+        let sub = requireArg(args, 0, "store subcommand")
+        func store(_ index: Int) -> Store {
+            let text = requireArg(args, index, "store")
+            guard let store = Store.named(text) else {
+                fail("unknown store '\(text)' (\(Store.all.map(\.id).joined(separator: "|")))")
+            }
+            return store
+        }
+        switch sub {
+        case "list":
+            let bottle = args.count > 1 ? try loadBottle(args[1]).1 : nil
+            let processes = bottle.map { Steam.bottleProcesses(in: $0) } ?? []
+            for s in Store.all {
+                var line = s.id.padding(toLength: 11, withPad: " ", startingAt: 0) + s.name.padding(toLength: 18, withPad: " ", startingAt: 0)
+                if let bottle {
+                    line += !s.isInstalled(in: bottle) ? "not installed" : (s.running(in: processes).isEmpty ? "installed" : "running")
+                } else {
+                    line += s.cachedInstaller(in: project).map { "installer cached: \($0.lastPathComponent)" } ?? "installer not downloaded"
+                }
+                print(line)
+                print("           " + s.notes)
+                if let issue = s.knownIssue { print("           known issue: " + issue) }
+            }
+
+        case "install":
+            let (runtime, bottle) = try loadBottle(requireArg(args, 1, "bottle name"))
+            let s = store(2)
+            let started = Date()
+            let say: (String) -> Void = { print("\(s.id): \($0)") }
+            if s.isInstalled(in: bottle) && !(s.isSteam && !Steam.isBootstrapped(in: bottle)) {
+                say("already installed in '\(bottle.name)'")
+                return
+            }
+            let setup = try blockingAwait { try await s.installer(in: project, say: { print("\(s.id): \($0)") }) }
+            let log = newJobLog(bottle: bottle.name, label: "\(s.id)-setup")
+            say("installing (log: \(log.path))")
+            let inv = s.isSteam ? try runtime.steamInstaller(setup, in: bottle) : try runtime.storeInstaller(s, installer: setup, in: bottle)
+            // an installer that starts its launcher may stay around with it (Battle.net)
+            let ended = try runLogged(inv, log: log, done: { s.isInstalled(in: bottle) && s.isRunning(in: bottle) })
+            if let ended, ended != .exited(0) { say("installer ended with \(ended)") }
+            guard s.isInstalled(in: bottle) else {
+                fail("\(s.name) is not installed in '\(bottle.name)' after its installer (\(ended?.description ?? "running")); see \(log.path)")
+            }
+            if s.isSteam {
+                try runtime.bootstrapSteamWaiting(in: bottle, log: newJobLog(bottle: bottle.name, label: "steam-bootstrap"), say: say)
+            }
+            say(String(format: "installed in '%@' in %.0f s; start it with: cross store launch %@ %@",
+                       bottle.name, Date().timeIntervalSince(started), bottle.name, s.id))
+            if let issue = s.knownIssue { say("known issue: \(issue)") }
+
+        case "launch":
+            let (runtime, bottle) = try loadBottle(requireArg(args, 1, "bottle name"))
+            let s = store(2)
+            execReplacing(try runtime.storeLaunch(s, in: bottle, arguments: Array(args.dropFirst(3))))
+
+        default:
+            fail("unknown store subcommand '\(sub)'\n\n" + usage)
+        }
+
+    case "install":
+        let (runtime, bottle) = try loadBottle(requireArg(args, 0, "bottle name"))
+        let file = URL(fileURLWithPath: requireArg(args, 1, "installer path")).standardizedFileURL
+        guard FileManager.default.fileExists(atPath: file.path) else { fail("no such file: \(file.path)") }
+        let before = Programs.snapshot(of: bottle)
+        let log = newJobLog(bottle: bottle.name, label: "install-\(file.deletingPathExtension().lastPathComponent)")
+        print("running \(file.lastPathComponent) in '\(bottle.name)' (log: \(log.path))")
+        let started = Date()
+        let ended = try runLogged(try runtime.installer(file, arguments: Array(args.dropFirst(2)), in: bottle), log: log)
+        print(String(format: "installer ended with %@ after %.0f s", ended?.description ?? "?", Date().timeIntervalSince(started)))
+        let added = Programs.recordInstall(since: before, in: bottle)
+        if added.isEmpty {
+            print("no new programs found (no new shortcut, no new exe under Program Files); add one with `cross programs \(bottle.name) add <exe>`")
+        }
+        for p in added {
+            print("new program: \(p.name)  \(p.exe)" + (p.source == .shortcut ? "  (shortcut)" : "  (added to programs.json)"))
+        }
+
+    case "programs":
+        let (runtime, bottle) = try loadBottle(requireArg(args, 0, "bottle name"))
+        let sub = args.count > 1 ? args[1] : "list"
+        switch sub {
+        case "list":
+            for p in Programs.list(in: bottle) {
+                let argText = p.arguments.isEmpty ? "" : " " + p.arguments
+                print(p.name.padding(toLength: 28, withPad: " ", startingAt: 0) + p.source.rawValue.padding(toLength: 10, withPad: " ", startingAt: 0) + p.exe + argText)
+            }
+        case "launch":
+            let name = requireArg(args, 2, "program name")
+            guard let p = Programs.find(name, in: bottle) else { fail("no program '\(name)' in '\(bottle.name)' (see cross programs \(bottle.name))") }
+            guard let exe = Programs.unixURL(of: p.exe, in: bottle), FileManager.default.fileExists(atPath: exe.path) else {
+                fail("\(p.exe) does not exist in '\(bottle.name)'")
+            }
+            execReplacing(try runtime.runExe(exe, arguments: p.argumentList + args.dropFirst(3), in: bottle))
+        case "add":
+            let path = URL(fileURLWithPath: requireArg(args, 2, "exe path")).standardizedFileURL
+            guard FileManager.default.fileExists(atPath: path.path) else { fail("no such file: \(path.path)") }
+            var name = path.deletingPathExtension().lastPathComponent
+            var rest = Array(args.dropFirst(3))
+            if let i = rest.firstIndex(of: "--name") {
+                name = requireArg(rest, i + 1, "name")
+                rest.removeSubrange(i...(i + 1))
+            }
+            let argText = rest.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
+            let p = Program(name: name, exe: Programs.windowsPath(of: path, in: bottle), arguments: argText, source: .manual)
+            try Programs.add(p, to: bottle)
+            print("added \(p.name): \(p.exe)\(argText.isEmpty ? "" : " " + argText)")
+        case "remove":
+            let name = requireArg(args, 2, "program name")
+            guard let p = Programs.find(name, in: bottle) else { fail("no program '\(name)' in '\(bottle.name)'") }
+            try Programs.remove(p, from: bottle)
+            print("removed \(p.name)" + (p.source == .shortcut ? " from the list (its shortcut stays in the bottle)" : ""))
+        default:
+            fail("unknown programs subcommand '\(sub)'\n\n" + usage)
+        }
 
     case "kill":
         let (runtime, bottle) = try loadBottle(requireArg(args, 0, "bottle name"))
