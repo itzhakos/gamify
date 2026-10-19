@@ -256,10 +256,17 @@ extension Bottle {
            !leftovers.isEmpty {
             throw CrossError("\(prefix.path) holds files of its own (\(leftovers.prefix(3).joined(separator: ", "))) while its disk image is not mounted; move them out of the way first")
         }
+        try fm.createDirectory(at: prefix, withIntermediateDirectories: true)
+        try writeMarker(image: image, in: prefix)   // under the volume, seen again once it is ejected
         try DiskImage.attach(image, at: prefix)
         guard DiskImage.isMountPoint(prefix) else {
             throw CrossError("hdiutil attached \(image.lastPathComponent) but \(prefix.path) is not a mount point")
         }
+    }
+
+    static func writeMarker(image: URL, in prefix: URL) throws {
+        try (image.lastPathComponent + "\n").write(to: prefix.appendingPathComponent(mountMarker),
+                                                   atomically: true, encoding: .utf8)
     }
 
     /// Ejects an image-backed bottle's volume and leaves the marker in its mount point.
@@ -281,8 +288,7 @@ extension Bottle {
             }
         }
         try? FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
-        try? (image.lastPathComponent + "\n").write(to: prefix.appendingPathComponent(Bottle.mountMarker),
-                                                     atomically: true, encoding: .utf8)
+        try? Bottle.writeMarker(image: image, in: prefix)
     }
 }
 
@@ -322,9 +328,6 @@ extension Runtime {
         try FileManager.default.createDirectory(at: project.bottles, withIntermediateDirectories: true)
         try DiskImage.create(image, sizeGB: sizeGB, volumeName: name)
         do {
-            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
-            try (image.lastPathComponent + "\n").write(to: prefix.appendingPathComponent(Bottle.mountMarker),
-                                                        atomically: true, encoding: .utf8)
             try Bottle.mount(image: image, at: prefix)
             // keep Spotlight out of the bottle's volume (it would also hold it busy on eject)
             FileManager.default.createFile(atPath: prefix.appendingPathComponent(".metadata_never_index").path, contents: nil)
