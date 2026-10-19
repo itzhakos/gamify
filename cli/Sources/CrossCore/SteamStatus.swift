@@ -159,7 +159,8 @@ extension Steam {
 
     /// Every process whose working directory is inside the bottle's prefix.
     public static func bottleProcesses(in bottle: Bottle) -> [BottleProcess] {
-        let prefix = bottle.prefix.standardizedFileURL.path + "/"
+        // realpath: a prefix reached through a symlink (/tmp -> /private/tmp) still matches the cwd the kernel reports
+        let prefix = DiskImage.realPath(bottle.prefix) + "/"
         let count = proc_listallpids(nil, 0)
         guard count > 0 else { return [] }
         var pids = [pid_t](repeating: 0, count: Int(count) + 64)
