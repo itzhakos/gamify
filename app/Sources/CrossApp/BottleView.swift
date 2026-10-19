@@ -10,6 +10,8 @@ struct BottleView: View {
     @State private var commandLine = ""
     @State private var exeArguments = ""
     @State private var showingStorage = false
+    /// Install… on a store row asks first (download size, what it does, known issues).
+    @State private var storeToInstall: Store?
 
     private var drivable: Bool { model.isDrivable(bottle) }
     private var jobs: [Job] { model.jobs(for: bottle.name) }
@@ -34,10 +36,14 @@ struct BottleView: View {
                 storageRow
                 actions
                     .disabled(model.storageWork[bottle.name] != nil)
-                if Steam.isInstalled(in: bottle) { steamStatusLine }
+                HStack(alignment: .top, spacing: 12) {
+                    storesBox
+                    ProgramsBox(bottle: bottle)
+                }
+                .disabled(model.storageWork[bottle.name] != nil)
                 processes
                 LogView(url: shownJob?.logURL)
-                    .frame(minHeight: 160)
+                    .frame(minHeight: 120)
             } else {
                 GroupBox {
                     Text("This bottle uses the '\(bottle.config.runtime)' runtime. Gamify (like the `cross` CLI) only drives \(Runtime.known.joined(separator: " and ")) bottles; use scripts/bottle.sh for this one.")
@@ -61,6 +67,7 @@ struct BottleView: View {
             guard drivable else { return }
             while !Task.isCancelled {
                 await model.refreshSteamStatus(bottle.name)
+                await model.refreshStoresAndPrograms(bottle.name)
                 await model.refreshStorage(bottle.name)
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
@@ -71,6 +78,32 @@ struct BottleView: View {
         } message: { prompt in
             Text("\(prompt.reason) Restart it? Steam quits and starts again; nothing is lost.")
         }
+        .alert("Install \(storeToInstall?.name ?? "")?", isPresented: Binding(get: { storeToInstall != nil },
+                                                                     set: { if !$0 { storeToInstall = nil } }),
+               presenting: storeToInstall) { store in
+            Button("Install") { model.installStore(store, in: bottle.name) }
+            Button("Cancel", role: .cancel) {}
+        } message: { store in
+            Text("Gamify downloads \(store.name)'s official installer (once, kept in Downloads) and installs it in '\(bottle.name)'. \(store.notes)" + (store.knownIssue.map { "\n\nKnown issue: \($0)" } ?? ""))
+        }
+        .alert(installPromptTitle, isPresented: installPromptShown, presenting: model.installPrompt) { prompt in
+            Button("Install") { prompt.files.forEach { model.installProgram($0, in: prompt.bottle) } }
+            if prompt.files.allSatisfy({ $0.pathExtension.lowercased() == "exe" }) {
+                Button("Just Run") { prompt.files.forEach { model.runExe($0, arguments: [], in: prompt.bottle) } }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { prompt in
+            Text("\(prompt.files.map(\.lastPathComponent).joined(separator: ", ")) looks like an installer. Install it in '\(prompt.bottle)'? Its programs then show up under Programs.")
+        }
+    }
+
+    private var installPromptShown: Binding<Bool> {
+        Binding(get: { model.installPrompt?.bottle == bottle.name },
+                set: { if !$0 { model.installPrompt = nil } })
+    }
+
+    private var installPromptTitle: String {
+        model.installPrompt?.files.count == 1 ? "Install \(model.installPrompt!.files[0].lastPathComponent)?" : "Install these programs?"
     }
 
     /// Disk: used / allocated with a bar for an image-backed bottle, the Mac's free
@@ -122,21 +155,116 @@ struct BottleView: View {
 
     private var steamStatus: Steam.Status? { model.steamStatus[bottle.name] }
 
-    /// One line: installed / running / online or offline, from `Steam.status`, with a
-    /// Restart Steam shortcut when it looks stuck.
-    private var steamStatusLine: some View {
-        HStack(spacing: 8) {
-            Circle().fill(steamStatusColor).frame(width: 8, height: 8)
-            Text(steamStatusText)
-            if let reason = steamStatus?.stuckReason, !model.steamRestarting.contains(bottle.name) {
-                Text(reason).foregroundStyle(.secondary)
-                Button("Restart Steam") { model.restartSteam(bottle.name) }
-                    .controlSize(.small)
+    /// Steam first (its own install chain, status line and Restart), then the other
+    /// stores: state from a process scan by exe name, Install… (asks first) or Launch.
+    private var storesBox: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 6) {
+                steamRow
+                ForEach(Store.all.filter { !$0.isSteam }) { store in
+                    Divider()
+                    storeRow(store)
+                }
             }
-            Spacer()
+            .padding(4)
+        } label: {
+            Label("Stores", systemImage: "bag")
+        }
+        .frame(minWidth: 360, maxWidth: .infinity)
+        .layoutPriority(1)
+    }
+
+    /// Steam: installed / running / online or offline from `Steam.status` (the former
+    /// status line), the Install / Launch / Restart buttons, and the stuck reason with a
+    /// Restart Steam shortcut.
+    private var steamRow: some View {
+        let installed = Steam.isInstalled(in: bottle)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Circle().fill(installed ? steamStatusColor : .clear)
+                    .overlay(Circle().stroke(Color.secondary.opacity(installed ? 0 : 0.6)))
+                    .frame(width: 8, height: 8)
+                Text("Steam").fontWeight(.medium)
+                Text(installed || model.steamSetup.contains(bottle.name)
+                     ? String(steamStatusText.dropFirst("Steam: ".count)) : "not installed")
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer()
+                steamButtons
+            }
+            if let reason = steamStatus?.stuckReason, installed, !model.steamRestarting.contains(bottle.name) {
+                HStack(spacing: 8) {
+                    Text(reason).foregroundStyle(.secondary)
+                    Button("Restart Steam") { model.restartSteam(bottle.name) }
+                        .controlSize(.small)
+                }
+                .padding(.leading, 16)
+            }
         }
         .font(.callout)
-        .padding(.horizontal, 6)
+    }
+
+    @ViewBuilder
+    private var steamButtons: some View {
+        if model.steamSetup.contains(bottle.name) {
+            Button {} label: {
+                Label("Setting up…", systemImage: "hourglass")
+            }
+            .disabled(true)
+            .help("First start: Steam downloads its client, then restarts with the webhelper shim (see the steam-bootstrap log)")
+        } else if model.steamRestarting.contains(bottle.name) {
+            Button {} label: {
+                Label("Restarting…", systemImage: "hourglass")
+            }
+            .disabled(true)
+            .help("Steam is asked to quit, the bottle is cleared, then Steam starts again (see the job list)")
+        } else if Steam.isInstalled(in: bottle) {
+            Button("Launch") {
+                model.launchSteam(bottle.name)
+            }
+            .help("Launch Steam: installs the webhelper shim, resets ActiveProcess, clears stale locks, runs steam.exe \(Runtime.steamFlags.joined(separator: " ")) (the first start downloads the client and restarts Steam once). A stuck Steam is detected first and offered a restart.")
+            Button {
+                model.restartSteam(bottle.name)
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .help("Restart Steam: steam.exe -shutdown, wait up to 20 s, wineserver -k to be sure, then Launch Steam. The way out of a Steam that lost its connection or stopped responding.")
+        } else {
+            Button("Install Steam") {
+                model.installSteam(bottle.name)
+            }
+            .help("Runs SteamSetup.exe /S (downloads it into downloads/steam/ if missing), then starts Steam once to download its client")
+        }
+    }
+
+    private func storeRow(_ store: Store) -> some View {
+        let installed = store.isInstalled(in: bottle)
+        let running = model.storesRunning[bottle.name]?.contains(store.id) == true
+        let installing = model.isInstallingStore(store, in: bottle.name)
+        return HStack(spacing: 8) {
+            Circle().fill(running ? Color.green : (installed ? Color.secondary : .clear))
+                .overlay(Circle().stroke(Color.secondary.opacity(installed || running ? 0 : 0.6)))
+                .frame(width: 8, height: 8)
+            Text(store.name).fontWeight(.medium)
+            Text(installing ? "installing…" : (running ? "running" : (installed ? "installed" : "not installed")))
+                .foregroundStyle(.secondary)
+            if let issue = store.knownIssue {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .help("Known issue: \(issue)")
+            }
+            Spacer()
+            if installing {
+                ProgressView().controlSize(.small)
+            } else if installed {
+                Button("Launch") { model.launchStore(store, in: bottle.name) }
+                    .help("Starts \(store.name) (\(store.executable(in: bottle)?.lastPathComponent ?? "")\(store.launchArguments.isEmpty ? "" : " " + store.launchArguments.joined(separator: " "))). \(store.notes)")
+            } else {
+                Button("Install…") { storeToInstall = store }
+                    .help("Downloads \(store.name)'s official installer into downloads/\(store.id)/ and installs it here. \(store.notes)")
+            }
+        }
+        .font(.callout)
     }
 
     private var steamStatusText: String {
@@ -204,40 +332,6 @@ struct BottleView: View {
                     .keyboardShortcut("o")
                     TextField("arguments (optional)", text: $exeArguments)
                         .frame(maxWidth: 220)
-                    Divider().frame(height: 20)
-                    if model.steamSetup.contains(bottle.name) {
-                        Button {} label: {
-                            Label("Setting up Steam…", systemImage: "hourglass")
-                        }
-                        .disabled(true)
-                        .help("First start: Steam downloads its client, then restarts with the webhelper shim (see the steam-bootstrap log)")
-                    } else if model.steamRestarting.contains(bottle.name) {
-                        Button {} label: {
-                            Label("Restarting Steam…", systemImage: "hourglass")
-                        }
-                        .disabled(true)
-                        .help("Steam is asked to quit, the bottle is cleared, then Steam starts again (see the job list)")
-                    } else if Steam.isInstalled(in: bottle) {
-                        Button {
-                            model.launchSteam(bottle.name)
-                        } label: {
-                            Label("Launch Steam", systemImage: "gamecontroller")
-                        }
-                        .help("Installs the webhelper shim, resets ActiveProcess, clears stale locks, runs steam.exe \(Runtime.steamFlags.joined(separator: " ")) (the first start downloads the client and restarts Steam once). A stuck Steam is detected first and offered a restart.")
-                        Button {
-                            model.restartSteam(bottle.name)
-                        } label: {
-                            Label("Restart Steam", systemImage: "arrow.clockwise")
-                        }
-                        .help("steam.exe -shutdown, wait up to 20 s, wineserver -k to be sure, then Launch Steam. The way out of a Steam that lost its connection or stopped responding.")
-                    } else {
-                        Button {
-                            model.installSteam(bottle.name)
-                        } label: {
-                            Label("Install Steam", systemImage: "arrow.down.circle")
-                        }
-                        .help("Runs SteamSetup.exe /S (downloads it into downloads/steam/ if missing), then starts Steam once to download its client")
-                    }
                     Spacer()
                     Button(role: .destructive) {
                         model.killBottle(bottle.name)
@@ -278,7 +372,7 @@ struct BottleView: View {
                         }
                     }
                 }
-                .frame(maxHeight: 110)
+                .frame(maxHeight: 88)
             }
         }
     }

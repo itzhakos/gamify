@@ -48,8 +48,14 @@ public struct Store: Identifiable, Equatable {
     /// What does not work under Wine here yet, said plainly; nil when the launcher reaches
     /// its sign-in window.
     public let knownIssue: String?
+    /// The installer starts a copy of itself (or a helper) and exits right away; the
+    /// install is done once the launcher is installed and running (Battle.net).
+    public var installerHandsOff = false
 
     public var isSteam: Bool { id == Store.steam.id }
+
+    /// How long an install may take after a hands-off installer exited.
+    public static let handsOffTimeout: TimeInterval = 20 * 60
 
     public static func == (a: Store, b: Store) -> Bool { a.id == b.id }
 
@@ -146,7 +152,8 @@ extension Store {
         processNames: ["battle.net.exe", "battle.net launcher.exe"],
         staleLockDirs: [],
         notes: "Bootstrapper that downloads and starts the app by itself (no clicks needed). systemsurvey.exe is disabled, as CrossOver does.",
-        knownIssue: "The Battle.net Login window opens but only shows its spinner: the 32-bit app's browser finds no working graphics path under Wine here (needs DXVK).")
+        knownIssue: "The Battle.net Login window opens but only shows its spinner: the 32-bit app's browser finds no working graphics path under Wine here (needs DXVK).",
+        installerHandsOff: true)
 
     /// Every store, Steam first.
     public static let all: [Store] = [.steam, .epic, .gog, .battlenet]

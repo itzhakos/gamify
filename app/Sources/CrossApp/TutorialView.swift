@@ -324,7 +324,8 @@ struct TutorialView: View {
     private var steamStep: some View {
         page {
             Text("Steam is the easiest way to get games into a bottle. Gamify installs it with Valve's official installer and takes care of the two things Steam needs help with on a Mac: its first start, and the built-in browser that draws the store, which Gamify swaps for one that renders here.")
-            Text("If Steam ever shows \"No connection\" or stops responding (for example after the Mac slept), Restart Steam on the bottle page quits it and starts it again cleanly; Gamify also offers this by itself when Launch Steam finds Steam stuck.")
+            Text("If Steam ever shows \"No connection\" or stops responding (for example after the Mac slept), Restart Steam (the ↻ button next to Steam on the bottle page) quits it and starts it again cleanly; Gamify also offers this by itself when Launch Steam finds Steam stuck.")
+            Text("Epic Games Store, GOG Galaxy and Battle.net are in the same Stores area of the bottle page and install the same way, with their own official installers.")
                 .font(.callout).foregroundStyle(.secondary)
             if let bottle = chosenBottle {
                 if model.steamSetup.contains(bottle.name) {
@@ -417,7 +418,7 @@ struct TutorialView: View {
                 bullet("play.fill", .accentColor, "Run .exe…",
                        "For games and installers outside Steam: pick any .exe, optionally with arguments. The panel opens in the bottle's C: drive.")
                 bullet("arrow.down.doc", .accentColor, "Drag and drop",
-                       "Drop an .exe onto a bottle page or onto the Gamify icon in the Dock, or open it with Gamify from Finder. It runs in that (or the selected) bottle.")
+                       "Drop an .exe onto a bottle page or onto the Gamify icon in the Dock, or open it with Gamify from Finder. It runs in that (or the selected) bottle; an installer is offered Install a Program instead, so it shows up under Programs.")
             }
             box("Also on the bottle page") {
                 bullet("slider.horizontal.3", .secondary, "Graphics picker",
@@ -441,7 +442,7 @@ struct TutorialView: View {
                 locationRow("doc.text", "Logs", model.logsRoot,
                             "One log per program started from Gamify, named after the bottle, the time and the program. Attach these when asking for help.")
                 locationRow("arrow.down.circle", "Downloads", model.project?.downloads,
-                            "Installers Gamify fetched (the Steam installer), kept so a reinstall needs no network.")
+                            "Installers Gamify fetched (Steam and the other stores), kept so a reinstall needs no network.")
             }
             box("Settings") {
                 Text("Settings (⌘,) shows every folder Gamify uses and the exact environment a bottle runs with. Its General tab replays this tutorial, and Help > Gamify Tutorial brings it back too.")

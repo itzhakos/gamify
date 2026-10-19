@@ -29,7 +29,7 @@ struct CrossApp: App {
             ContentView()
                 .environmentObject(model)
                 .environmentObject(updates)
-                .frame(minWidth: 860, minHeight: 560)
+                .frame(minWidth: 860, minHeight: 640)
                 // bottles made by the CLI or scripts while the app was in the background
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                     model.reloadBottles()

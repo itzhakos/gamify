@@ -233,9 +233,15 @@ func main() throws {
             let log = newJobLog(bottle: bottle.name, label: "\(s.id)-setup")
             say("installing (log: \(log.path))")
             let inv = s.isSteam ? try runtime.steamInstaller(setup, in: bottle) : try runtime.storeInstaller(s, installer: setup, in: bottle)
-            // an installer that starts its launcher may stay around with it (Battle.net)
-            let ended = try runLogged(inv, log: log, done: { s.isInstalled(in: bottle) && s.isRunning(in: bottle) })
+            let ended = try runLogged(inv, log: log)
             if let ended, ended != .exited(0) { say("installer ended with \(ended)") }
+            if ended != nil, s.installerHandsOff {
+                say("the installer continues in its own window; waiting for \(s.name) to start")
+                let deadline = Date().addingTimeInterval(Store.handsOffTimeout)
+                while !(s.isInstalled(in: bottle) && s.isRunning(in: bottle)) && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 2)
+                }
+            }
             guard s.isInstalled(in: bottle) else {
                 fail("\(s.name) is not installed in '\(bottle.name)' after its installer (\(ended?.description ?? "running")); see \(log.path)")
             }

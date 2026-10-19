@@ -67,6 +67,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var hostFreeBytes: Int64 = 0
     /// Bottles being resized or moved (folder <-> disk image), with the current step.
     @Published private(set) var storageWork: [String: String] = [:]
+    /// Store ids running per bottle (process scan by exe name, AppModel+Stores.swift).
+    @Published var storesRunning: [String: Set<String>] = [:]
+    /// "<bottle>/<store id>" while that store's installer runs.
+    @Published var storeInstalls: Set<String> = []
+    /// The Programs list per bottle (shortcuts + programs.json), refreshed with the status.
+    @Published var programs: [String: [Program]] = [:]
+    /// An installer opened with the app or dropped on a bottle page: Install or Just Run?
+    @Published var installPrompt: InstallPrompt?
 
     struct SteamStuckPrompt: Identifiable, Equatable {
         let id = UUID()
@@ -321,16 +329,22 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// .exe files opened with the app or dropped on a bottle page: run each in `bottle`
-    /// (default: the selected one), like `cross run <bottle> <exe>`.
+    /// .exe and .msi files opened with the app or dropped on a bottle page, for `bottle`
+    /// (default: the selected one): installers (.msi, or an .exe named like setup/install)
+    /// are offered Install a Program (`installPrompt`); other .exe files run, like
+    /// `cross run <bottle> <exe>`.
     func openFiles(_ urls: [URL], in bottleName: String? = nil) {
-        let exes = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "exe" }
-        guard !exes.isEmpty else { return }
+        let files = urls.filter { $0.isFileURL && ["exe", "msi"].contains($0.pathExtension.lowercased()) }
+        guard !files.isEmpty else { return }
         guard let name = bottleName ?? selection, let bottle = bottle(named: name), isDrivable(bottle) else {
-            alertMessage = "Select a winecx bottle to run \(exes.map(\.lastPathComponent).joined(separator: ", ")) in."
+            alertMessage = "Select a winecx bottle to run \(files.map(\.lastPathComponent).joined(separator: ", ")) in."
             return
         }
-        for exe in exes { runExe(exe, arguments: [], in: bottle.name) }
+        var installers: [URL] = []
+        for file in files {
+            if Self.looksLikeInstaller(file) { installers.append(file) } else { runExe(file, arguments: [], in: bottle.name) }
+        }
+        if !installers.isEmpty { installPrompt = InstallPrompt(bottle: bottle.name, files: installers) }
     }
 
     func winecfg(_ bottle: String) {
