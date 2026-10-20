@@ -295,17 +295,19 @@ extension Bottle {
 extension Runtime {
     /// Ranges the UI and the CLI accept, in GB. `currentUse` is what the data already
     /// takes inside the bottle (0 for a new one); the maximum is that plus the host's
-    /// free space, so a full bottle can never need more than the disk has.
-    public static func storageRange(project: Project, currentUse: Int64 = 0) -> ClosedRange<Int> {
-        let free = DiskImage.hostFreeBytes(at: project.bottles)
+    /// free space, so a full bottle can never need more than the disk has. `home` is the
+    /// folder the image lives in (another drive for a bottle kept elsewhere; nil: the
+    /// bottles folder).
+    public static func storageRange(project: Project, currentUse: Int64 = 0, home: URL? = nil) -> ClosedRange<Int> {
+        let free = DiskImage.hostFreeBytes(at: home ?? project.bottles)
         let low = max(BottleStorage.minimumGB, Int((currentUse + BottleStorage.gib / 2) / BottleStorage.gib) + 1)
         let high = Int((free + currentUse) / BottleStorage.gib)
         return low...max(low, high)
     }
 
     /// The default for a new image-backed bottle: 64 GB, less when the disk has less free.
-    public static func defaultStorageGB(project: Project) -> Int? {
-        let free = Int(DiskImage.hostFreeBytes(at: project.bottles) / BottleStorage.gib)
+    public static func defaultStorageGB(project: Project, home: URL? = nil) -> Int? {
+        let free = Int(DiskImage.hostFreeBytes(at: home ?? project.bottles) / BottleStorage.gib)
         guard free >= BottleStorage.minimumGB else { return nil }
         return min(BottleStorage.defaultGB, free)
     }
@@ -320,20 +322,33 @@ extension Runtime {
     }
 
     /// Creates `bottles/<name>.sparsebundle` of `sizeGB` and mounts it at bottles/<name>.
-    func createImage(for name: String, prefix: URL, sizeGB: Int) throws -> URL {
+    /// With `location` (a checked folder elsewhere, Location.swift) the image is created
+    /// there and bottles/<name>.sparsebundle links to it. Returns the image's entry in
+    /// the bottles folder.
+    func createImage(for name: String, prefix: URL, sizeGB: Int, location: URL? = nil) throws -> URL {
+        let fm = FileManager.default
         let image = Bottle.imageURL(name: name, in: project)
-        guard !FileManager.default.fileExists(atPath: image.path) else {
-            throw CrossError("\(image.path) already exists")
+        let target = location.map { $0.appendingPathComponent(image.lastPathComponent) } ?? image
+        for url in Set([image, target]) where fm.fileExists(atPath: url.path) || Bottle.isSymlink(url) {
+            throw CrossError("\(url.path) already exists")
         }
-        try FileManager.default.createDirectory(at: project.bottles, withIntermediateDirectories: true)
-        try DiskImage.create(image, sizeGB: sizeGB, volumeName: name)
+        try fm.createDirectory(at: project.bottles, withIntermediateDirectories: true)
+        try DiskImage.create(target, sizeGB: sizeGB, volumeName: name)
         do {
+            if location != nil {
+                try fm.createSymbolicLink(at: image, withDestinationURL: target)
+                try Bottle.recordLocation(target, name: name, in: project)
+            }
             try Bottle.mount(image: image, at: prefix)
             // keep Spotlight out of the bottle's volume (it would also hold it busy on eject)
-            FileManager.default.createFile(atPath: prefix.appendingPathComponent(".metadata_never_index").path, contents: nil)
+            fm.createFile(atPath: prefix.appendingPathComponent(".metadata_never_index").path, contents: nil)
         } catch {
             if DiskImage.isMountPoint(prefix) { try? DiskImage.detach(prefix.path, force: true) }
-            try? FileManager.default.removeItem(at: image)
+            try? fm.removeItem(at: target)
+            if location != nil {
+                try? fm.removeItem(at: image)
+                try? Bottle.recordLocation(nil, name: name, in: project)
+            }
             throw error
         }
         return image
@@ -365,7 +380,7 @@ extension Runtime {
     public func resizeStorage(_ bottle: Bottle, to sizeGB: Int) throws -> Bottle {
         guard let image = bottle.image else { throw CrossError("'\(bottle.name)' is a folder bottle; convert it first") }
         guard let usage = bottle.storageUsage else { throw CrossError("'\(bottle.name)' is not mounted") }
-        try Runtime.checkSize(sizeGB, in: Runtime.storageRange(project: project, currentUse: usage.used),
+        try Runtime.checkSize(sizeGB, in: Runtime.storageRange(project: project, currentUse: usage.used, home: bottle.home(in: project)),
                               what: "'\(bottle.name)' uses \(formatGB(usage.used))")
         try requireIdle(bottle, for: "resize the disk")
         try bottle.unmount()
@@ -396,16 +411,18 @@ extension Runtime {
     /// the image (mounted at a hidden temporary mount point), compare the two trees,
     /// rename the folder to a hidden backup, mount the image at the bottle's path,
     /// then delete the backup. Any failure before the swap leaves the folder as it was.
+    /// A bottle kept elsewhere gets its image next to its folder (same drive), linked
+    /// from bottles/<name>.sparsebundle.
     public func moveToImage(_ bottle: Bottle, sizeGB: Int, progress: @escaping (String) -> Void = { _ in }) throws -> Bottle {
         guard bottle.image == nil else { throw CrossError("'\(bottle.name)' already lives in a disk image") }
+        if let error = bottle.storageError { throw CrossError(error) }
         try requireIdle(bottle, for: "move the bottle")
         progress("Measuring \(bottle.name)…")
-        let source = try TreeSummary(of: bottle.prefix)
-        let free = DiskImage.hostFreeBytes(at: project.bottles)
-        guard source.allocated + BottleStorage.gib <= free else {
-            throw CrossError("moving '\(bottle.name)' needs \(formatGB(source.allocated + BottleStorage.gib)) free for the copy; the disk has \(formatGB(free))")
-        }
-        try Runtime.checkSize(sizeGB, in: Runtime.storageRange(project: project, currentUse: source.allocated),
+        let home = bottle.home(in: project)
+        let folder = URL(fileURLWithPath: DiskImage.realPath(bottle.prefix))
+        let source = try TreeSummary(of: folder)
+        try requireFree(source.allocated, at: home, for: bottle.name)
+        try Runtime.checkSize(sizeGB, in: Runtime.storageRange(project: project, currentUse: source.allocated, home: home),
                               what: "'\(bottle.name)' holds \(formatGB(source.allocated))")
 
         let fm = FileManager.default
@@ -414,19 +431,23 @@ extension Runtime {
         guard !fm.fileExists(atPath: backup.path) else { throw CrossError("\(backup.path) is left over from an earlier move; remove it first") }
         progress("Creating a \(sizeGB) GB disk image…")
         let image = Bottle.imageURL(name: bottle.name, in: project)
-        guard !fm.fileExists(atPath: image.path) else { throw CrossError("\(image.path) already exists") }
+        let located = bottle.location != nil
+        let target = located ? home.appendingPathComponent(image.lastPathComponent) : image
+        for url in Set([image, target]) where fm.fileExists(atPath: url.path) || Bottle.isSymlink(url) {
+            throw CrossError("\(url.path) already exists")
+        }
         if DiskImage.isMountPoint(staging) { try? DiskImage.detach(staging.path, force: true) }
         try? fm.removeItem(at: staging)
         let cleanUp = {
             if DiskImage.isMountPoint(staging) { try? DiskImage.detach(staging.path, force: true) }
             try? fm.removeItem(at: staging)
-            try? fm.removeItem(at: image)
+            try? fm.removeItem(at: target)
         }
         do {
-            try DiskImage.create(image, sizeGB: sizeGB, volumeName: bottle.name)
-            try DiskImage.attach(image, at: staging)
+            try DiskImage.create(target, sizeGB: sizeGB, volumeName: bottle.name)
+            try DiskImage.attach(target, at: staging)
             fm.createFile(atPath: staging.appendingPathComponent(".metadata_never_index").path, contents: nil)
-            try copyTree(from: bottle.prefix, to: staging, total: source.allocated, progress: progress)
+            try copyTree(from: folder, to: staging, total: source.allocated, progress: progress)
             progress("Verifying the copy…")
             try source.verify(against: TreeSummary(of: staging))
             try DiskImage.detach(staging.path)
@@ -436,39 +457,52 @@ extension Runtime {
             throw error
         }
         progress("Switching \(bottle.name) to the disk image…")
-        try fm.moveItem(at: bottle.prefix, to: backup)
+        try fm.moveItem(at: bottle.prefix, to: backup)   // the folder, or the link to it
         do {
+            if located {
+                try fm.createSymbolicLink(at: image, withDestinationURL: target)
+                try Bottle.recordLocation(target, name: bottle.name, in: project)
+            }
             try fm.createDirectory(at: bottle.prefix, withIntermediateDirectories: false)
             try Bottle.mount(image: image, at: bottle.prefix)
             var moved = try Bottle.load(name: bottle.name, in: project)
             moved.config.storage = BottleStorage(image: image.lastPathComponent, sizeGB: sizeGB)
             try moved.saveConfig()
             progress("Removing the old folder…")
-            try fm.removeItem(at: backup)
+            try Bottle.removeData(at: backup)
             return moved
         } catch {
             if DiskImage.isMountPoint(bottle.prefix) { try? DiskImage.detach(bottle.prefix.path, force: true) }
             try? fm.removeItem(at: bottle.prefix)
             try? fm.moveItem(at: backup, to: bottle.prefix)
-            try? fm.removeItem(at: image)
+            if located {
+                try? fm.removeItem(at: image)
+                try? Bottle.recordLocation(bottle.location, name: bottle.name, in: project)
+            }
+            try? fm.removeItem(at: target)
             throw error
         }
     }
 
     /// The reverse of `moveToImage`: copy the volume's contents into a plain folder,
-    /// verify, eject, swap the folder in and delete the image.
+    /// verify, eject, swap the folder in and delete the image. A bottle kept elsewhere
+    /// gets its folder next to its image (that drive must be APFS or Mac OS Extended).
     public func moveToFolder(_ bottle: Bottle, progress: @escaping (String) -> Void = { _ in }) throws -> Bottle {
         guard let image = bottle.image else { throw CrossError("'\(bottle.name)' already is a folder bottle") }
         guard bottle.storageUsage != nil else { throw CrossError("'\(bottle.name)' is not mounted") }
+        let home = bottle.home(in: project)
+        try Runtime.checkFolderBottle(at: home)
         try requireIdle(bottle, for: "move the bottle")
         progress("Measuring \(bottle.name)…")
         let source = try TreeSummary(of: bottle.prefix)
-        let free = DiskImage.hostFreeBytes(at: project.bottles)
-        guard source.allocated + BottleStorage.gib <= free else {
-            throw CrossError("moving '\(bottle.name)' needs \(formatGB(source.allocated + BottleStorage.gib)) free for the copy; the disk has \(formatGB(free))")
-        }
+        try requireFree(source.allocated, at: home, for: bottle.name)
         let fm = FileManager.default
-        let staging = project.bottles.appendingPathComponent(".\(bottle.name).moving")
+        let located = bottle.location != nil
+        let target = home.appendingPathComponent(bottle.name)
+        if located, fm.fileExists(atPath: target.path) || Bottle.isSymlink(target) {
+            throw CrossError("\(target.path) already exists")
+        }
+        let staging = home.appendingPathComponent(".\(bottle.name).moving")
         guard !fm.fileExists(atPath: staging.path) else { throw CrossError("\(staging.path) is left over from an earlier move; remove it first") }
         do {
             try fm.createDirectory(at: staging, withIntermediateDirectories: false)
@@ -488,17 +522,24 @@ extension Runtime {
             throw error
         }
         // the image goes aside first: while it exists the bottle counts as image-backed
+        // (for a bottle kept elsewhere this moves the link; the image stays where it is)
         let oldImage = project.bottles.appendingPathComponent(".\(bottle.name).\(Bottle.imageExtension)")
         try? fm.removeItem(at: oldImage)
         try fm.moveItem(at: image, to: oldImage)
         try? fm.removeItem(at: bottle.prefix.appendingPathComponent(Bottle.mountMarker))
         try fm.removeItem(at: bottle.prefix)   // the empty mount point
-        try fm.moveItem(at: staging, to: bottle.prefix)
+        if located {
+            try fm.moveItem(at: staging, to: target)
+            try fm.createSymbolicLink(at: bottle.prefix, withDestinationURL: target)
+            try Bottle.recordLocation(target, name: bottle.name, in: project)
+        } else {
+            try fm.moveItem(at: staging, to: bottle.prefix)
+        }
         var moved = try Bottle.load(name: bottle.name, in: project)
         moved.config.storage = nil
         try moved.saveConfig()
         progress("Removing the disk image…")
-        try fm.removeItem(at: oldImage)
+        try Bottle.removeData(at: oldImage)
         return moved
     }
 
@@ -509,14 +550,17 @@ extension Runtime {
         if bottle.image != nil {
             _ = try? runWaiting(try waitForBottle(bottle), quiet: true)
         }
-        try Bottle.delete(bottle)
+        try Bottle.delete(bottle, in: project)
     }
 
     /// ditto (keeps symlinks such as dosdevices/z: -> /, modes, extended attributes),
-    /// reporting progress from the target volume's use while it runs.
-    func copyTree(from source: URL, to target: URL, total: Int64, progress: @escaping (String) -> Void) throws {
+    /// reporting progress from the target volume's use while it runs (when the target is
+    /// a volume of its own or on another drive than the source). `options` go to ditto.
+    func copyTree(from source: URL, to target: URL, total: Int64, progress: @escaping (String) -> Void,
+                  options: [String] = []) throws {
         let start = DiskImage.volume(of: target)?.usage.used ?? 0
         let measureTarget = DiskImage.isMountPoint(target)
+            || DiskImage.volume(of: target)?.mountedOn != DiskImage.volume(of: source)?.mountedOn
         let finished = DispatchSemaphore(value: 0)
         if measureTarget && total > 0 {
             Thread.detachNewThread {
@@ -530,7 +574,7 @@ extension Runtime {
             progress("Copying \(formatGB(total))…")
         }
         defer { finished.signal() }
-        let r = try DiskImage.run(DiskImage.dittoPath, [source.path, target.path])
+        let r = try DiskImage.run(DiskImage.dittoPath, options + [source.path, target.path])
         guard r.status == 0 else {
             throw CrossError("copying \(source.lastPathComponent) failed: \(r.errors.isEmpty ? "exit \(r.status)" : r.errors)")
         }
@@ -538,9 +582,25 @@ extension Runtime {
 }
 
 extension Bottle {
-    /// Ejects (if image-backed) and removes the bottle from disk. No process check.
-    static func delete(_ bottle: Bottle) throws {
+    /// Ejects (if image-backed) and removes the bottle from disk. No process check. A
+    /// bottle kept elsewhere loses its data there, its link and its .location file; one
+    /// whose drive is not connected only its entries in the bottles folder (its data
+    /// cannot be reached, so it is left alone).
+    static func delete(_ bottle: Bottle, in project: Project) throws {
         let fm = FileManager.default
+        if bottle.isUnreachable {
+            for link in [bottle.prefix, imageURL(name: bottle.name, in: project)] where isSymlink(link) {
+                try fm.removeItem(at: link)
+            }
+            // an image bottle's mount point: only when it holds nothing but the marker
+            if isDirectory(bottle.prefix), !isSymlink(bottle.prefix), !DiskImage.isMountPoint(bottle.prefix),
+               ((try? fm.contentsOfDirectory(atPath: bottle.prefix.path)) ?? []).allSatisfy(ignorableNames.contains) {
+                try fm.removeItem(at: bottle.prefix)
+            }
+            try recordLocation(nil, name: bottle.name, in: project)
+            try? fm.removeItem(at: ejectedFlag(name: bottle.name, in: project))
+            return
+        }
         if let image = bottle.image {
             if DiskImage.isMountPoint(bottle.prefix) {
                 try bottle.unmount(force: true)
@@ -551,10 +611,12 @@ extension Bottle {
                 throw CrossError("\(bottle.prefix.path) is still mounted")
             }
             if fm.fileExists(atPath: bottle.prefix.path) { try fm.removeItem(at: bottle.prefix) }
-            try fm.removeItem(at: image)
+            try removeData(at: image)
         } else {
-            try fm.removeItem(at: bottle.prefix)
+            try removeData(at: bottle.prefix)
         }
+        try recordLocation(nil, name: bottle.name, in: project)
+        try? fm.removeItem(at: ejectedFlag(name: bottle.name, in: project))
     }
 }
 
