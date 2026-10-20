@@ -73,6 +73,7 @@ struct FindBottlesSheet: View {
             } else {
                 let name = names[f.id] ?? f.suggestedName
                 TextField("Name", text: Binding(get: { name }, set: { names[f.id] = $0 }))
+                    .textFieldStyle(.roundedBorder)
                     .frame(width: 110)
                 Button("Add") { add(f, as: name) }
                     .disabled(model.newBottleNameError(name) != nil || name.isEmpty)

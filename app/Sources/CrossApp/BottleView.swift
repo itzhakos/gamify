@@ -164,7 +164,7 @@ struct BottleView: View {
             } else {
                 Text("Folder, no size limit")
                 if let free = model.hostFree[bottle.name], free > 0 {
-                    Text("· \(formatGB(free)) free on \(model.locationText(bottle) == nil ? "this Mac" : "the drive")").foregroundStyle(.secondary)
+                    Text("· \(formatGB(free)) free").foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             if model.storageWork[bottle.name] == nil {
@@ -375,7 +375,7 @@ struct BottleView: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(bottle.name).font(.largeTitle.bold())
-                Text(bottle.prefix.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(bottle.location?.path ?? bottle.prefix.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Spacer()
             if drivable {

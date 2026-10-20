@@ -112,8 +112,20 @@ struct ContentView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                if !model.foundOnDrives.isEmpty {
-                    FoundBottlesBanner()
+                VStack(alignment: .leading, spacing: 0) {
+                    if !model.foundOnDrives.isEmpty {
+                        FoundBottlesBanner()
+                    }
+                    Button {
+                        model.showingFindBottles = true
+                    } label: {
+                        Label("Find Bottles…", systemImage: "externaldrive.badge.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(model.project == nil)
+                    .help("Search connected drives (or a folder) for bottles that are not in the list, e.g. on a drive from another Mac")
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
@@ -127,15 +139,7 @@ struct ContentView: View {
                     .disabled(model.runtime == nil)
                     .help("Create a winecx bottle")
                 }
-                ToolbarItem {
-                    Button {
-                        model.showingFindBottles = true
-                    } label: {
-                        Label("Find Bottles", systemImage: "externaldrive.badge.magnifyingglass")
-                    }
-                    .disabled(model.project == nil)
-                    .help("Search connected drives (or a folder) for bottles that are not in the list, e.g. on a drive from another Mac")
-                }
+
             }
         } detail: {
             if model.isLocating {
