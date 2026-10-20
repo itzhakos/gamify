@@ -43,12 +43,16 @@ open app/build/Cross.app
 ```
 cli/Package.swift                 products: executable `cross`, library `CrossCore`
 cli/Sources/CrossCore/
-  Project.swift    root lookup (CROSS_ROOT, walk up from the binary, then the cwd)
+  Project.swift    root lookup (CROSS_ROOT, walk up from the binary, then the cwd);
+                   CROSS_BOTTLES moves the bottles folder (the registry)
   Runtime.swift    winecx + D3DMetal environment (= scripts/winecx-env.sh)
   Bottle.swift     bottles/<name>, cross.json + .runtime fallback, list/load/save
                    (image-backed bottles are mounted here, see "Disk allocation")
   Storage.swift    per-bottle disk images: DiskImage (hdiutil), mount/unmount, resize,
                    move to/from an image, delete, requireIdle (see "Disk allocation")
+  Location.swift   bottles kept elsewhere: link + .location file, unreachable-drive
+                   messages, file system check, Move to (see "Bottles on other drives")
+  Discover.swift   Eject, Find (search drives for bottles), Add, Remove from List
   Steam.swift      webhelper shim, ActiveProcess reset, lock cleanup, installer location,
                    bootstrap check (isBootstrapped, webhelperLog)
   SteamStatus.swift  Steam.status(in:): the bottle's Steam processes (libproc) + the newest
@@ -68,10 +72,14 @@ cli/Sources/CrossCore/
                    environmentLines
 cli/Sources/cross/main.swift      argument parsing + printing only
 app/Sources/CrossApp/
-  CrossApp.swift   App, AppDelegate (files opened with the app), sidebar, New Bottle sheet
+  CrossApp.swift   App, AppDelegate (files opened with the app), sidebar (Find Bottles…,
+                   found-on-drive banner), New Bottle sheet (Location)
   AppModel.swift   bottles, jobs (processes started from the app), all actions
   BottleView.swift bottle page: Disk row, actions, graphics picker, Stores box (Steam row
                    with its status), process list, log; StorageSheet, StorageSizeField
+  AppModel+Location.swift  moveBottle, ejectBottle, mountBottle, forgetBottle, Find/Add,
+                   drive mount/unmount notifications
+  FindBottlesView.swift  the Find Bottles sheet
   AppModel+Stores.swift  installStore / launchStore, installProgram / addProgram /
                    removeProgram / launchProgram, refreshStoresAndPrograms, InstallPrompt
   ProgramsView.swift  the Programs box (list, Install a Program…, Add a Program… sheet)
@@ -150,7 +158,8 @@ For a Finder-like launch from a terminal:
   "only variables Cross sets" filter (on by default) hides inherited variables. With
   it off, the output is the full `cross env`.
 - **Settings > Paths**: root, runtime, D3DMetal, wined3d, shim and logs paths with
-  existence checks, plus the root override.
+  existence checks, plus the root override and (since 0.6) the bottles folder override
+  (see "Bottles on other drives").
 - Delete bottle (sidebar context menu, with confirmation): `wineserver -k` + remove,
   like `cross bottle delete`.
 
@@ -523,6 +532,155 @@ symlink targets, not file contents (ditto is trusted for the bytes). Clicking th
 the sheets by hand was not done (no UI automation access); their actions were exercised
 through the same AppModel calls.
 
+
+## Bottles on other drives (2026-10-20)
+
+![a bottle whose drive is not connected](screenshots/bottle-drive-not-connected.png)
+
+A bottle can live outside the bottles folder, e.g. on an external drive, and run from
+there. The bottles folder stays the registry of bottles: a bottle kept elsewhere is
+reached through a symlink in it, so every existing code path (Bottle.list/load, process
+detection by cwd, Programs, Stores, Storage, WINEPREFIX) works unchanged.
+
+### Layout
+
+```
+folder bottle `foo` kept in /Volumes/Ext/Games:
+  bottles/foo                 -> /Volumes/Ext/Games/foo              (symlink)
+  bottles/foo.location           "/Volumes/Ext/Games/foo"           (the target's real path)
+image-backed bottle `bar` kept in /Volumes/Ext/Games:
+  bottles/bar.sparsebundle    -> /Volumes/Ext/Games/bar.sparsebundle (symlink)
+  bottles/bar                    the mount point, local like every image bottle's
+  bottles/bar.location           "/Volumes/Ext/Games/bar.sparsebundle"
+  bottles/.bar.ejected           only after Eject (see below)
+```
+
+- cross.json stays inside the bottle. `Bottle.location` is the target (nil for a bottle in
+  the bottles folder); `Bottle.home(in:)` the folder that holds it.
+- `Bottle.list` follows links (`URL.isDirectoryKey` is false for a symlink, so entries are
+  checked with `fileExists(isDirectory:)`) and also lists names that only have a
+  `.location` file or a dangling link. Paths are compared as real paths (realpath(3)):
+  `Steam.bottleProcesses` already matched the cwd against the prefix's real path.
+- **Drive not connected**: the `.location` file names the target even when the link
+  dangles, so the bottle is listed with `storageError` "'foo' lives on /Volumes/Ext which
+  is not connected" (a target under /Volumes whose volume is not a mount point), or "is
+  missing from <folder>" when the drive is there but the bottle is not. The app shows the
+  page above (Try Again, Remove from List) and the sidebar says "Ext not connected".
+  Nothing is deleted or recreated automatically. The app reads the list again when a drive
+  is mounted or unmounted (NSWorkspace notifications), so a bottle comes back by itself.
+- **File systems**: a folder bottle needs APFS or Mac OS Extended (statfs `f_fstypename`
+  apfs/hfs). A Wine prefix holds symlinks (dosdevices/c: -> ../drive_c, z: -> /) and relies
+  on Unix permissions, which exFAT, FAT and NTFS do not have; network shares are refused
+  for folders too. A disk image works on any writable file system (a sparse bundle is a
+  folder of 8 MB band files with APFS inside): verified on exFAT. On exFAT macOS keeps
+  extended attributes in `._*` files next to every file (FileManager does not list them);
+  a move off exFAT deletes the ones ditto copied. A fresh image on exFAT reported 3.5 GB
+  used inside (1.7 GB on APFS) while taking 1.7 GB on the drive.
+- **Eject**: an image bottle on another drive stays mounted once used, and macOS then
+  refuses to eject that drive ("dissented by diskimages-helper"). Eject (bottle page >
+  Move to… > Eject, sidebar menu, `cross bottle eject`) unmounts the image and writes
+  `bottles/.<name>.ejected`, so listing the bottles (the app does it every time it comes to
+  the front) does not mount it again; the bottle shows "ejected" with a Mount button, and
+  using it (`Bottle.load`: cross cmd, launching anything) mounts it and removes the flag.
+  A folder bottle needs no eject: once its programs are closed the drive ejects normally.
+- **Ownership**: Wine refuses a prefix owned by another uid ("not owned by you"). A drive
+  from another Mac keeps that Mac's uid unless the volume ignores ownership (the default
+  for most external drives); Add checks this for folder bottles and says what to do
+  (Get Info > "Ignore ownership on this volume"). Image bottles are mounted by hdiutil with
+  `noowners`, so they are not affected.
+
+### Operations (CrossCore `Location.swift`, `Discover.swift`)
+
+| Operation | Steps |
+|---|---|
+| create (`createBottle(…, location:)`) | `checkLocation` (exists, real path, not inside the bottles folder or a bottle, writable; the bottles folder itself = default), folder bottles: file system check, `<folder>/<name>`, link + `.location`, cross.json; image bottles: `hdiutil create` at `<folder>/<name>.sparsebundle`, link, `.location`, mount at bottles/<name>. Sizes: `storageRange`/`defaultStorageGB` take `home:` = the chosen folder, so the limit is that drive's free space |
+| move (`moveBottle(_:to:)`) | `requireIdle`; folder: `ditto` into `<target>/.<name>.moving`, compare trees, rename to `<target>/<name>`, then swap the entry (a real folder is renamed to `bottles/.<name>.folder` first; a link is replaced with one rename(2); back to the default folder the link is removed and the copy takes its place), `.location` updated or removed, original deleted. Image: eject, `ditto --norsrc --noextattr --noacl --noqtn` the whole .sparsebundle, compare, swap the same way, mount from the new place, delete the old image. Failures undo the steps done so far and remount the original |
+| folder <-> image while elsewhere | `moveToImage` creates the image next to the folder (same drive) and links it; `moveToFolder` puts the folder next to the image and refuses on exFAT |
+| delete | data at the target, link, `.location`, mount point; a bottle whose drive is not connected loses only its entries (its data cannot be reached, so it is left alone; the CLI and the app say so) |
+| eject / mount | see above |
+| find (`Bottle.find`) | the connected local, writable volumes under /Volumes except the startup disk (`searchableVolumes`; network shares only when chosen as a folder), or chosen folders, 3 levels deep, not into packages or hidden folders: folders with drive_c + system.reg/cross.json, and .sparsebundle images, attached read-only at a temporary mount point for a moment to read their cross.json (images without one are not bottles and are skipped). Each result says whether it is already listed (real paths of the bottles folder's entries) |
+| add (`addBottle(at:name:)`) | link + `.location` under the folder's name or another one; an image's `storage.image` is renamed when added under another name; refused when it is already listed, the name is taken, the folder is not a prefix, the file system cannot hold folders, or the owner check fails |
+| remove from list (`forgetBottle`) | unmount (image), remove link(s), `.location`, mount point and flag; the data stays |
+
+### Bottles folder (Settings > Paths)
+
+`Project.bottlesOverride` (from `CROSS_BOTTLES`; the app sets it from the `bottlesFolder`
+user default, Settings > Paths > Bottles folder, Choose… / Reset to Default) replaces
+`<dataDir>/bottles` as the registry: new bottles go there and the list is read from there.
+Since 0.6 `CROSS_BOTTLES` moves only the bottles; downloads stay in the data dir (before,
+its parent became the data dir). Bottles in the old folder are not listed while another
+folder is set; the help text says to reset the setting or move them first. To keep one
+bottle elsewhere, use its location instead (it stays in the list).
+
+### CLI
+
+```
+cross bottle create <name> [--storage <GB>|unlimited] [--location <folder>|default]
+cross bottle set <name> location <folder>|default   move (verified copy, then swap)
+cross bottle list            "  (in /Volumes/Ext/Games)" after bottles kept elsewhere;
+                             "unavailable: 'foo' lives on /Volumes/Ext which is not connected"
+cross bottle eject <name>    unmount an image bottle until it is used again
+cross bottle find [<folder>...]   default: every connected local drive
+cross bottle add <folder|image> [--name <name>]
+cross bottle forget <name>   take a bottle kept elsewhere off the list, keep its files
+cross bottle delete <name>   removes the data at the target too (only the entries when unreachable)
+```
+
+### App
+
+![New Bottle with a location on a drive](screenshots/new-bottle-location.png)
+
+- **New Bottle**: a Location section: "Bottles folder" or a folder picked with Choose…
+  (NSOpenPanel, can create folders; the footer names the exact target). The Disk size
+  range and default follow the chosen drive's free space. On a drive that cannot hold a
+  folder bottle, "Unlimited (a plain folder)" shows why and Create is disabled; choosing
+  such a drive switches to "Its own disk".
+- **Bottle page**: the header shows where the bottle really is; the Disk row says "on
+  Ext" (or "in the bottles folder") with a **Move to…** menu: Choose a Folder… (refused
+  with an explanation for a folder bottle and an exFAT target), The Bottles Folder, and
+  Eject for an image bottle kept elsewhere. Progress shows in the row like a disk move.
+  Unavailable bottles get a page per cause: drive not connected (Try Again, Remove from
+  List), ejected (Mount), image cannot be opened (Try Again).
+- **Sidebar**: an external-drive icon and "on Ext" for bottles kept elsewhere ("Ext not
+  connected", "ejected"); context menu Eject and Remove from List…; Delete Bottle says
+  what it will remove. **Find Bottles…** at the bottom of the sidebar (also in the File
+  menu) opens the sheet below; when a drive is connected while the app runs it is searched
+  and a banner offers the bottles that are not listed yet (Review… / Dismiss).
+
+![Find Bottles](screenshots/find-bottles.png)
+![banner after connecting a drive](screenshots/bottle-on-drive-banner.png)
+
+### Verified (2026-10-20, CROSS_BOTTLES in a scratch dir, runtimes from the checkout)
+
+The "external drive" was a 20 GB APFS sparse bundle attached at /Volumes/TestDrive
+(`hdiutil attach -mountpoint /Volumes/TestDrive` works without sudo), unplugging was
+`hdiutil detach`; the exFAT drive an 8 GB `hdiutil create -fs ExFAT` image at
+/Volumes/TestExFAT. Test bottles 8 GB images / ~1.7 GB folders.
+
+| Check | Result |
+|---|---|
+| create on the drive | `bottle create extf --storage unlimited --location /Volumes/TestDrive/Games` (17 s) and `exti --storage 8` (16 s); links + `.location` in bottles/, data on the drive; `cross cmd <b> /c ver`: Microsoft Windows 10.0.19043 in both |
+| list | `folder (no limit)  (in /Volumes/TestDrive/Games)`, `image 1.7 GB used of 8.0 GB  (in …)` |
+| process detection through the link | notepad.exe copied as Epic's EpicGamesLauncher.exe and as Steam's steam.exe: `cross store launch <b> epic` -> `cross store list <b>`: epic running (both bottles), steam running then installed after kill; `set location` while it ran: refused ("cannot move the bottle while programs run in 'extf' (epicgameslauncher.exe, …)") |
+| unplug | plain `hdiutil detach /Volumes/TestDrive` with exti mounted: refused, "dissented by … diskimages-helper" (what Finder would hit, hence Eject); after unmounting it: ejected; list: both "unavailable: 'extf' lives on /Volumes/TestDrive which is not connected"; `cross cmd` refuses with the same text; app page screenshot above |
+| plug back | list fine, `cross cmd` works in both; in the running app the page switched back by itself (mount notification) |
+| eject | `cross bottle eject exti`: unmounted, list "ejected …", drive then ejects cleanly; after re-attaching it stays ejected until `cross cmd exti` mounts it |
+| another Mac (second bottles folder) | `cross bottle find`: both found "not listed" (0.7 s, image looked into read-only); `bottle add …/extf --name extf2` and `add …/exti.sparsebundle`; adding extf again: "already listed as 'extf2'"; both run; `forget` both: entries gone, data and the first registry untouched |
+| move, folder | default -> drive (1.7 GB, 4.4 s), drive -> another folder on it, drive -> default; runs after each |
+| move, image | default -> drive (2.9 s), drive -> another folder, drive -> default; runs after each |
+| convert while elsewhere | located folder -> 8 GB image next to it, located image -> folder next to it; both run |
+| delete | located folder and (ejected) located image: data, links, `.location` gone, `hdiutil info` shows nothing left; with the drive unplugged: only the entries removed ("its data … could not be reached and was not touched"), Find saw both again afterwards |
+| exFAT | folder bottle: refused on create, on move and on image -> folder ("/Volumes/TestExFAT is formatted as exFAT, which cannot hold a folder bottle …"); image bottle: created and boots (`/c ver`), moved onto exFAT and off again (no `._` files left on APFS) |
+| size limit follows the drive | exFAT drive with 6.4 GB free: `--storage 9 --location /Volumes/TestExFAT` refused ("at most 8 GB"), the same in the default folder (12 GB free) accepted |
+| bottles folder override | `bottlesFolder` user default set to a second folder: the app listed only that folder's bottle; key deleted afterwards |
+| app | `app/build.sh`; screenshots of the New Bottle Location choice, the not-connected page, the drive banner and Find Bottles (launched with an uncommitted hook that opens the sheets; the app was started with CROSS_ROOT/CROSS_BOTTLES in its environment) |
+
+Not verified: a real USB/Thunderbolt drive and pulling it out while an image bottle is
+mounted (simulated only with `hdiutil detach`; a forced detach of a volume holding a
+mounted image was not tried); a drive from a real second Mac with a different uid (the
+owner check is written from Wine's rule, not exercised); HFS+ (treated like APFS); NTFS
+and network shares beyond the type check; clicking Add / Move to… / Eject in the app by
+hand (no UI automation; the same CrossCore calls were run from the CLI).
 
 ## Stores and programs (2026-10-20)
 
