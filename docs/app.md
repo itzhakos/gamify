@@ -53,6 +53,11 @@ cli/Sources/CrossCore/
                    bootstrap check (isBootstrapped, webhelperLog)
   SteamStatus.swift  Steam.status(in:): the bottle's Steam processes (libproc) + the newest
                    state of logs/connection_log.txt, and stuckReason (see "Steam status")
+  SteamLibrary.swift  what Steam keeps on disk: KeyValues (.acf/.vdf text), installed apps
+                   (appmanifest_*.acf in every library), installedApp(containing:), the
+                   account (config/loginusers.vdf), licences (binary appcache/packageinfo.vdf)
+  SteamCheck.swift Steam.check (see "Steam check"), the probe launch (steamProbe), runCapturing,
+                   programLaunch (Steam games through steam://rungameid)
   Store.swift      Store model (Steam, Epic, GOG Galaxy, Battle.net): installer source and
                    cache, silent install, launcher, workarounds, running check; storeInstaller,
                    storeLaunch, installer (any .exe/.msi); CLI helpers runLogged,
@@ -72,6 +77,8 @@ app/Sources/CrossApp/
   AppModel.swift   bottles, jobs (processes started from the app), all actions
   BottleView.swift bottle page: Disk row, actions, graphics picker, Stores box (Steam row
                    with its status), process list, log; StorageSheet, StorageSizeField
+  AppModel+SteamCheck.swift  checkSteam (Steam.check off the main thread)
+  SteamCheckView.swift  the Check… sheet on the Steam row
   AppModel+Stores.swift  installStore / launchStore, installProgram / addProgram /
                    removeProgram / launchProgram, refreshStoresAndPrograms, InstallPrompt
   ProgramsView.swift  the Programs box (list, Install a Program…, Add a Program… sheet)
@@ -649,3 +656,87 @@ windows of the app on this machine (no assistive access), so clicks could not be
 alert's buttons and the open panels were therefore not clicked; Install / Just Run call
 `installProgram` / `runExe`, which were exercised directly. Signing in was not attempted
 (no accounts), so nothing after a login (game installs from the stores) is verified.
+
+## Steam check and licences (2026-10-20)
+
+Background: games started through Steam in Gamify ran as a demo (Dishonored 2 earlier,
+Split Fiction in its Friend's Pass mode now), and the user wanted to know whether games
+get their ownership information from Steam under our Wine. Findings (evidence in NOTES.md,
+2026-10-20): Split Fiction runs as the Friend's Pass because the account's only licence for
+app 2001120 is the free Friend's Pass package; Steam's answers to games are correct under
+Wine; but Launch Steam on an already running Steam zeroed `ActiveProcess\pid`, after which
+games built with older Steam SDKs could not start their Steam session. That is fixed, the
+check repairs a bottle that still has it, and Steam games started from Gamify go through
+Steam.
+
+### The probe (`src/steam-probe`)
+`steam-probe.exe [--fix] [--dll <steam_api64.dll>] <appid>...` (mingw-w64, `make -C
+src/steam-probe`), run from C:\ProgramData\Gamify\steam-probe with a steam_api64.dll
+copied from an installed game (the newest one; the client ships none) and steam_appid.txt
+= 480 (Spacewar, owned by every account). It prints one `key: value` line per fact:
+`active process` (ActiveProcess pid vs the live steam.exe, found with Toolhelp32; `--fix`
+writes the right pid), `steam running` (SteamAPI_IsSteamRunning), `init` (SteamAPI_Init,
+else InitSafe, else InitFlat), `logged on`, `steamid`, `appid`, the current app's
+subscribed / free weekend / family sharing / owner, then
+`app <id> subscribed=<0|1> installed=<0|1> purchased=<unix time>` per appid
+(BIsSubscribedApp, BIsAppInstalled, GetEarliestPurchaseUnixTime). Interfaces are found by
+name: `SteamAPI_SteamApps_v*` and friends (SDK 1.48+), else the old `SteamApps()` export,
+else `SteamClient()` + `SteamAPI_ISteamClient_GetISteam*` with the version string from the
+dll's data (or the known versions, newest first). Exit 0 = Steam answered, 2 = dll not
+loadable, 3 = init failed, 4 = no ISteamApps. Spacewar shows as "playing" for a second.
+
+### CrossCore `Steam.check(in:runtime:fix:)`
+- Client: running (steam.exe by libproc) and the newest connection_log state (online /
+  connecting / offline with the reason / at the sign-in window), the account name from
+  config/loginusers.vdf (matched to the log's `[U:1:n]`; never the password, the file has
+  none), `WantsOfflineMode`, stuckReason.
+- Steam Client Service: steamservice.exe running in the bottle, else whether its service
+  key is in system.reg. Under our Wine it is installed on the first start and Steam starts
+  it (seen running on 2026-10-20); it does not carry licences either way.
+- Game check (only while Steam runs): the probe with every installed appid (+480) and
+  `--fix`; a stale ActiveProcess pid is reported as repaired (or as a problem with
+  `--no-fix`).
+- Per installed app (appmanifest_*.acf of every library in libraryfolders.vdf): Steam's
+  live answer when there is one (subscribed=0 = no licence: demo or nothing), otherwise
+  and in addition the licence kinds from packageinfo.vdf: the packages of the account's
+  licence list that contain the app, classified by billing type and `extended` flags:
+  bought (anything not free), Friend's Pass (`freeplaytogether`), free weekend,
+  free promotion, free to play (billing 12), free. A Friend's Pass app is subscribed=1 for
+  the Steam API too, so only the package tells it apart.
+- How to launch: from Steam's library, or from Gamify (Programs / Run .exe), which starts
+  a Steam game through Steam.
+
+`cross steam check <bottle> [--no-fix]` prints it as text; the app's Steam row has a
+**Check…** button that opens a sheet with the same items (icons per level, Check Again,
+Copy Report). In a packaged app the probe lives in `Contents/Resources/steam-probe.exe`
+(the app layer: adding it to root/src would change runtime-version and force a DMG update).
+
+### Steam games through Steam (`Runtime.programLaunch`)
+Run .exe, a Programs row and `cross programs <b> launch` start an exe that lies inside a
+library's `steamapps/common/<installdir>` (and gets no extra arguments) as `steam.exe
+-noverifyfiles -no-cef-sandbox steam://rungameid/<appid>` (`Runtime.steam`), like the
+library's Play button: Steam runs its launch steps (cloud sync, install scripts, overlay,
+playtime) and hands the game its app id. Run .exe on Steam's own steam.exe gets the same
+launch as Launch Steam (with its flags, so the shim stays). `cross run` stays raw.
+
+### ActiveProcess fix
+`Runtime.steam` resets `HKCU\Software\Valve\Steam\ActiveProcess\pid` (stale pids after an
+unclean exit made Steam quit, 2026-10-17) and clears the htmlcache locks only when no
+steam.exe runs in the bottle. Before, a second Launch, a Restart that found Steam already
+back, or any `steam://` URL zeroed the pid of the running client, which writes it only at
+start; old steam_api dlls (SteamAPI_IsSteamRunning reads that pid) then failed
+SteamAPI_Init for the rest of the session.
+
+### Verified (2026-10-20, the user's `Steam` bottle, installed 0.5 app's runtime)
+- `cross steam check Steam` with Steam running: client online as the account, Steam Client
+  Service running, game check ok, Split Fiction "only the free Friend's Pass licence",
+  228980 fine; 1.4 s. Again after zeroing the pid with `reg add`: `--no-fix` reports the
+  wrong pid, the default run repairs it (`reg query` shows steam.exe's pid again).
+- `cross steam check steamtest` (checkout bottle, Steam not running): cache-only answers,
+  Portal 2 and Worms W.M.D owned.
+- `programLaunch` (scratch package calling CrossCore, nothing launched): SplitFiction.exe ->
+  `steam.exe -noverifyfiles -no-cef-sandbox steam://rungameid/2001120` in the Steam dir;
+  with an argument -> the exe directly; steam.exe -> `Runtime.steam`.
+- The Check… sheet compiles and builds (`app/build.sh`); it was not clicked through on
+  screen (the user's desktop was in use).
+

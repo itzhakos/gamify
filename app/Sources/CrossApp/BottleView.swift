@@ -12,6 +12,7 @@ struct BottleView: View {
     @State private var showingStorage = false
     /// Install… on a store row asks first (download size, what it does, known issues).
     @State private var storeToInstall: Store?
+    @State private var showingSteamCheck = false
 
     private var drivable: Bool { model.isDrivable(bottle) }
     private var jobs: [Job] { model.jobs(for: bottle.name) }
@@ -222,13 +223,21 @@ struct BottleView: View {
             Button("Launch") {
                 model.launchSteam(bottle.name)
             }
-            .help("Launch Steam: installs the webhelper shim, resets ActiveProcess, clears stale locks, runs steam.exe \(Runtime.steamFlags.joined(separator: " ")) (the first start downloads the client and restarts Steam once). A stuck Steam is detected first and offered a restart.")
+            .help("Launch Steam: installs the webhelper shim, resets ActiveProcess and clears stale locks (only when Steam is not running), runs steam.exe \(Runtime.steamFlags.joined(separator: " ")) (the first start downloads the client and restarts Steam once). A stuck Steam is detected first and offered a restart.")
             Button {
                 model.restartSteam(bottle.name)
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
             .help("Restart Steam: steam.exe -shutdown, wait up to 20 s, wineserver -k to be sure, then Launch Steam. The way out of a Steam that lost its connection or stopped responding.")
+            Button("Check…") {
+                model.checkSteam(bottle.name)
+                showingSteamCheck = true
+            }
+            .help("Check Steam: is it running and signed in, does a game here get its licences from Steam (a test program asks Steam, as Spacewar), and which licence each installed game has (owned, Friend's Pass, free weekend, ...)")
+            .sheet(isPresented: $showingSteamCheck) {
+                SteamCheckSheet(bottle: bottle.name)
+            }
         } else {
             Button("Install Steam") {
                 model.installSteam(bottle.name)

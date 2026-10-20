@@ -115,6 +115,7 @@ log "source archive"
 SRC_REF=HEAD; [ "$MODE" = publish ] && SRC_REF="$TAG"
 git archive --format=tar.gz --prefix="gamify-$VERSION-source/" -o "$OUT/Gamify-$VERSION-source.tar.gz" "$SRC_REF" \
   src/patches src/webhelper-shim/Makefile src/webhelper-shim/steamwebhelper-shim.c \
+  src/steam-probe/Makefile src/steam-probe/steam-probe.c \
   scripts/build-winecx-deps.sh scripts/build-winecx.sh scripts/build-winecx-full-deps.sh \
   scripts/build-winecx-full.sh scripts/winecx-env.sh scripts/package-app.sh docs/LICENSING.md
 

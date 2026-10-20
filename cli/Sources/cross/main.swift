@@ -14,6 +14,9 @@ cross - bottle manager and launcher for the winecx runtimes
   cross cmd   <bottle> [args...]           run cmd.exe, e.g. cross cmd cx /c ver
   cross cfg   <bottle>                     open winecfg
   cross steam <bottle> [args...]           install the webhelper shim, clear stale locks, launch Steam
+  cross steam check <bottle> [--no-fix]    is Steam running and signed in, do games get their licences
+                                           from it (a test program asks Steam), what licence each
+                                           installed game has (owned, Friend's Pass, free weekend, ...)
   cross store list [<bottle>]              the stores cross can install (with their state in <bottle>)
   cross store install <bottle> <store>     download the store's official installer, install it silently
   cross store launch  <bottle> <store> [args...]   start an installed store (steam = cross steam)
@@ -38,7 +41,10 @@ Stores: steam, epic (Epic Games Store), gog (GOG Galaxy), battlenet (Battle.net)
 are cached in downloads/<store>/; install and installer output goes to
 ~/Library/Logs/Gamify/<bottle>/. Programs: shortcuts are read from the Start Menu and Desktop
 folders of the bottle; entries added by hand (or found after an install that made no shortcut)
-are kept in bottles/<name>/programs.json.
+are kept in bottles/<name>/programs.json. A program inside a Steam library (steamapps/common)
+is launched through Steam (steam://rungameid/<appid>) unless it is given arguments.
+`steam check` runs src/steam-probe/steam-probe.exe with a game's steam_api64.dll as Spacewar
+(app 480) while Steam runs, and repairs Steam's ActiveProcess pid when it is stale (unless --no-fix).
 Runtimes: winecx (default) and winecx-full (same Wine + GStreamer, SDL2, MoltenVK),
 both in runtimes/; a bottle keeps the runtime it was created with.
 The project root is found by walking up from the binary (or set CROSS_ROOT).
@@ -192,6 +198,11 @@ func main() throws {
         execReplacing(try runtime.wineCommand(["winecfg"], in: bottle))
 
     case "steam":
+        if args.first == "check", args.count >= 2 {
+            let (runtime, bottle) = try loadBottle(args[1])
+            print(Steam.check(in: bottle, runtime: runtime, fix: !args.contains("--no-fix")).text)
+            return
+        }
         let (runtime, bottle) = try loadBottle(requireArg(args, 0, "bottle name"))
         execReplacing(try runtime.steam(in: bottle, arguments: Array(args.dropFirst())))
 
@@ -294,7 +305,9 @@ func main() throws {
             guard let exe = Programs.unixURL(of: p.exe, in: bottle), FileManager.default.fileExists(atPath: exe.path) else {
                 fail("\(p.exe) does not exist in '\(bottle.name)'")
             }
-            execReplacing(try runtime.runExe(exe, arguments: p.argumentList + args.dropFirst(3), in: bottle))
+            let (inv, steamGame) = try runtime.programLaunch(exe, arguments: p.argumentList + args.dropFirst(3), in: bottle)
+            if let steamGame { print("starting \(steamGame.name) through Steam (\(steamGame.runURL))") }
+            execReplacing(inv)
         case "add":
             let path = URL(fileURLWithPath: requireArg(args, 2, "exe path")).standardizedFileURL
             guard FileManager.default.fileExists(atPath: path.path) else { fail("no such file: \(path.path)") }

@@ -11,6 +11,7 @@ Every release in this repository has a `Gamify-<version>-source.tar.gz` asset wi
   `scripts/build-winecx-full.sh`, `scripts/winecx-env.sh`, `scripts/package-app.sh` — the
   scripts that configure, build, install and package the Wine runtime and its libraries;
 - `src/webhelper-shim/` — the Steam webhelper shim (our code);
+- `src/steam-probe/` — the Steam licence check program behind Check Steam (our code);
 - `docs/LICENSING.md` — the component list with versions and licenses.
 
 ## Upstream sources used

@@ -11,6 +11,8 @@
 #   Gamify.app/Contents/SharedSupport/root/runtimes/d3dmetal    Apple D3DMetal 3.0 + its notices
 #   Gamify.app/Contents/SharedSupport/root/src/webhelper-shim/steamwebhelper.exe
 #   Gamify.app/Contents/SharedSupport/root/THIRD_PARTY_NOTICES.md
+#   Gamify.app/Contents/Resources/steam-probe.exe   `cross steam check`'s test program (app layer,
+#                                                   so it does not change runtime-version)
 # Bottles and downloads of a bundled app live in ~/Library/Application Support/Gamify.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,6 +30,8 @@ log() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 
 log "webhelper shim"
 [ -f "$ROOT/src/webhelper-shim/steamwebhelper.exe" ] || make -C "$ROOT/src/webhelper-shim"
+log "steam probe"
+make -C "$ROOT/src/steam-probe"
 
 log "building the app"
 "$ROOT/app/build.sh"
@@ -41,6 +45,7 @@ mkdir -p "$R/runtimes" "$R/src/webhelper-shim" "$R/scripts"
 cp -R "$ROOT/runtimes/$RUNTIME" "$R/runtimes/$RUNTIME"
 cp -R "$ROOT/runtimes/d3dmetal" "$R/runtimes/d3dmetal"
 cp "$ROOT/src/webhelper-shim/steamwebhelper.exe" "$R/src/webhelper-shim/"
+cp "$ROOT/src/steam-probe/steam-probe.exe" "$APP/Contents/Resources/"
 cp "$ROOT/scripts/winecx-env.sh" "$R/scripts/"        # Project.looksLikeRoot wants runtimes/ + scripts/
 cp "$ROOT/docs/LICENSING.md" "$R/THIRD_PARTY_NOTICES.md"
 # nothing from the build trees, headers or static libs is needed at runtime

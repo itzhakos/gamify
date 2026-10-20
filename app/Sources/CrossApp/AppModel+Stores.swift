@@ -157,15 +157,18 @@ extension AppModel {
         Task { await refreshStoresAndPrograms(name) }
     }
 
-    /// Launch on a Programs row: the same path as Run .exe (cwd = the exe's directory).
+    /// Launch on a Programs row: the same path as Run .exe (cwd = the exe's directory;
+    /// a Steam game's exe without arguments goes through Steam).
     func launchProgram(_ program: Program, in name: String) {
         guard let bottle = bottle(named: name) else { return }
         guard let exe = Programs.unixURL(of: program.exe, in: bottle), FileManager.default.fileExists(atPath: exe.path) else {
             alertMessage = "\(program.exe) is no longer in '\(name)'. Remove it from the list, or reinstall it."
             return
         }
-        start(program.name, in: name) { runtime, bottle, _ in
-            try runtime.runExe(exe, arguments: program.argumentList, in: bottle)
+        start(program.name, in: name) { runtime, bottle, job in
+            let (inv, steamGame) = try runtime.programLaunch(exe, arguments: program.argumentList, in: bottle)
+            if let steamGame { job.note("cross: \(steamGame.name) is a Steam game; starting it through Steam (\(steamGame.runURL))") }
+            return inv
         }
     }
 }

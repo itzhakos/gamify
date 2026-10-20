@@ -61,6 +61,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var steamStatus: [String: Steam.Status] = [:]
     /// Launch Steam found a stuck Steam: the bottle page asks whether to restart it.
     @Published var steamStuckPrompt: SteamStuckPrompt?
+    /// The last Check Steam… result per bottle, and the bottles being checked (AppModel+SteamCheck.swift).
+    @Published var steamChecks: [String: Steam.Check] = [:]
+    @Published var steamChecking: Set<String> = []
     /// Use of each image-backed bottle's disk, refreshed with the Steam status.
     @Published private(set) var storageUsage: [String: StorageUsage] = [:]
     /// Free space on the Mac's disk that holds bottles/ (shown for folder bottles).
@@ -323,9 +326,13 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    /// Run .exe: `cross run`, except that a Steam game's exe (inside steamapps/common) is
+    /// started through Steam, like its Play button (`Runtime.programLaunch`).
     func runExe(_ exe: URL, arguments: [String], in bottle: String) {
-        start(exe.lastPathComponent, in: bottle) { runtime, bottle, _ in
-            try runtime.runExe(exe, arguments: arguments, in: bottle)
+        start(exe.lastPathComponent, in: bottle) { runtime, bottle, job in
+            let (inv, steamGame) = try runtime.programLaunch(exe, arguments: arguments, in: bottle)
+            if let steamGame { job.note("cross: \(steamGame.name) is a Steam game; starting it through Steam (\(steamGame.runURL))") }
+            return inv
         }
     }
 
