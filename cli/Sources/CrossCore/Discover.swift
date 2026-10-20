@@ -253,6 +253,6 @@ extension Runtime {
         guard stat(folder.path, &st) == 0, st.st_uid != getuid() else { return }
         var s = statfs()
         guard statfs(folder.path, &s) == 0, Int32(bitPattern: s.f_flags) & MNT_IGNORE_OWNERSHIP == 0 else { return }
-        throw CrossError("\(folder.path) belongs to another user account (uid \(st.st_uid)), which Wine refuses; in Finder select \(String(cString: &s.f_mntonname.0)), File > Get Info, check \"Ignore ownership on this volume\", then try again")
+        throw CrossError("\(folder.path) belongs to another user account (uid \(st.st_uid)), which Wine refuses; in Finder select \(DiskImage.fileSystem(at: folder)?.volume ?? "the drive"), File > Get Info, check \"Ignore ownership on this volume\", then try again")
     }
 }

@@ -91,6 +91,7 @@ struct EnvironmentTab: View {
 struct PathsTab: View {
     @EnvironmentObject var model: AppModel
     @AppStorage(AppModel.rootOverrideKey) private var rootOverride = ""
+    @AppStorage(AppModel.bottlesOverrideKey) private var bottlesOverride = ""
 
     private var bundled: Bool { model.project?.bundled ?? false }
 
@@ -100,6 +101,30 @@ struct PathsTab: View {
                 pathRow("Bottles", model.project?.bottles)
                 pathRow("Downloads", model.project?.downloads)
                 pathRow("Logs", model.logsRoot)
+            }
+            Section("Bottles folder") {
+                LabeledContent("Now", value: bottlesOverride.isEmpty ? "the default (\(model.project?.defaultBottles.path ?? "-"))" : bottlesOverride)
+                HStack {
+                    Button("Choose…") {
+                        let panel = NSOpenPanel()
+                        panel.title = "Choose the bottles folder"
+                        panel.prompt = "Use This Folder"
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.canCreateDirectories = true
+                        if panel.runModal() == .OK, let url = panel.url {
+                            bottlesOverride = url.path
+                            model.locateProject()
+                        }
+                    }
+                    Button("Reset to Default") {
+                        bottlesOverride = ""
+                        model.locateProject()
+                    }
+                    .disabled(bottlesOverride.isEmpty)
+                }
+                Text("Where new bottles go and where the bottle list is read from (user default `\(AppModel.bottlesOverrideKey)`, passed on as CROSS_BOTTLES). Bottles in the old folder are not listed while another folder is set: reset the setting, or move them first (bottle page > Move to…). To keep a single bottle somewhere else, e.g. on an external drive, choose its location in New Bottle or use Move to… instead; it stays in the list. Folder bottles need an APFS or Mac OS Extended drive; on exFAT the bottles folder can hold disk-image bottles only.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Runtime") {
                 LabeledContent("Available", value: model.availableRuntimes.isEmpty ? "none" : model.availableRuntimes.joined(separator: ", "))

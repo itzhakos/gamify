@@ -21,16 +21,7 @@ struct BottleView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             if let error = bottle.storageError {
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("This bottle's disk image cannot be opened", systemImage: "externaldrive.badge.exclamationmark")
-                            .font(.headline)
-                        Text(error).textSelection(.enabled)
-                        Button("Try Again") { model.reloadBottles() }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(4)
-                }
+                unavailableBox(error)
                 Spacer()
             } else if drivable {
                 storageRow
@@ -106,6 +97,50 @@ struct BottleView: View {
         model.installPrompt?.files.count == 1 ? "Install \(model.installPrompt!.files[0].lastPathComponent)?" : "Install these programs?"
     }
 
+    /// A bottle that cannot be used now: its drive is not connected (Try Again once it
+    /// is), it was ejected (Mount), or its disk image cannot be opened.
+    private func unavailableBox(_ error: String) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                if bottle.isUnreachable {
+                    Label("This bottle's drive is not connected", systemImage: "externaldrive.badge.xmark")
+                        .font(.headline)
+                } else if bottle.isEjected {
+                    Label("This bottle is ejected", systemImage: "eject")
+                        .font(.headline)
+                } else {
+                    Label("This bottle's disk image cannot be opened", systemImage: "externaldrive.badge.exclamationmark")
+                        .font(.headline)
+                }
+                Text(error).textSelection(.enabled)
+                if let location = bottle.location {
+                    Text("Kept at \(location.path)").font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                if bottle.isUnreachable {
+                    Text("Connect the drive, then try again. Nothing in the bottle was changed; Remove from List takes it off the list and leaves its files on the drive.")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                HStack {
+                    if let work = model.storageWork[bottle.name] {
+                        ProgressView().controlSize(.small)
+                        Text(work).foregroundStyle(.secondary)
+                    } else if bottle.isEjected && !bottle.isUnreachable {
+                        Button("Mount") { model.mountBottle(bottle.name) }
+                            .help("Mounts the bottle's disk image again")
+                    } else {
+                        Button("Try Again") { model.reloadBottles() }
+                    }
+                    if bottle.location != nil {
+                        Button("Remove from List") { model.forgetBottle(bottle.name) }
+                            .help("Takes the bottle off the list; its files stay where they are (Find Bottles adds it again)")
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(4)
+        }
+    }
+
     /// Disk: used / allocated with a bar for an image-backed bottle, the Mac's free
     /// space for a folder bottle, and the button to change it (StorageSheet).
     private var storageRow: some View {
@@ -128,11 +163,33 @@ struct BottleView: View {
                 }
             } else {
                 Text("Folder, no size limit")
-                if model.hostFreeBytes > 0 {
-                    Text("· \(formatGB(model.hostFreeBytes)) free on this Mac").foregroundStyle(.secondary)
+                if let free = model.hostFree[bottle.name], free > 0 {
+                    Text("· \(formatGB(free)) free on \(model.locationText(bottle) == nil ? "this Mac" : "the drive")").foregroundStyle(.secondary)
                 }
             }
+            if model.storageWork[bottle.name] == nil {
+                Text("·").foregroundStyle(.secondary)
+                Image(systemName: bottle.location == nil ? "wineglass" : "externaldrive")
+                    .foregroundStyle(.secondary)
+                Text(model.locationText(bottle).map { "on \($0)" } ?? "in the bottles folder")
+                    .foregroundStyle(.secondary)
+                    .help(bottle.location?.path ?? model.project?.bottles.path ?? "")
+            }
             Spacer()
+            Menu("Move to…") {
+                Button("Choose a Folder…", action: chooseMoveTarget)
+                Button("The Bottles Folder") { model.moveBottle(bottle.name, to: nil) }
+                    .disabled(bottle.location == nil)
+                if bottle.location != nil && bottle.isImageBacked {
+                    Divider()
+                    Button("Eject") { model.ejectBottle(bottle.name) }
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .controlSize(.small)
+            .disabled(model.storageWork[bottle.name] != nil)
+            .help("Copy this bottle to another folder or drive (it is checked before the original is removed), or back to the bottles folder. Programs in it must be closed.")
             Button(bottle.isImageBacked ? "Change…" : "Move to a Disk Image…") { showingStorage = true }
                 .controlSize(.small)
                 .disabled(model.storageWork[bottle.name] != nil)
@@ -145,6 +202,25 @@ struct BottleView: View {
         .sheet(isPresented: $showingStorage) {
             StorageSheet(bottle: bottle)
         }
+    }
+
+    /// Move to… > Choose a Folder…: the bottle goes to <folder>/<name> (or its image to
+    /// <folder>/<name>.sparsebundle) after a confirmation.
+    private func chooseMoveTarget() {
+        let panel = NSOpenPanel()
+        panel.title = "Move \(bottle.name) to…"
+        panel.message = "The bottle is copied into the folder you choose, checked, and then removed from where it is now."
+        panel.prompt = "Move Here"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = URL(fileURLWithPath: "/Volumes")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if !bottle.isImageBacked, let problem = Runtime.folderBottleProblem(at: url) {
+            model.alertMessage = "\(bottle.name): \(problem). Move it into a disk image first (Move to a Disk Image…), then move the image."
+            return
+        }
+        model.moveBottle(bottle.name, to: url)
     }
 
     /// The stuck prompt belongs to this page only when it is about this bottle.
