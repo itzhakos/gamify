@@ -45,6 +45,8 @@ struct CrossApp: App {
             CommandGroup(after: .newItem) {
                 Button("Reload Bottles") { model.reloadBottles() }
                     .keyboardShortcut("r")
+                Button("Find Bottles on Drives…") { model.showingFindBottles = true }
+                    .disabled(model.project == nil)
             }
             TutorialCommands()
             UpdateCommands(updates: updates, model: model)
@@ -86,6 +88,7 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var showingNewBottle = false
     @State private var pendingDelete: String?
+    @State private var pendingForget: String?
 
     var body: some View {
         NavigationSplitView {
@@ -95,11 +98,34 @@ struct ContentView: View {
                         BottleRow(bottle: bottle)
                             .tag(bottle.name)
                             .contextMenu {
-                                Button("Show in Finder") { model.reveal(bottle.prefix) }
+                                Button("Show in Finder") { model.reveal(bottle.location ?? bottle.prefix) }
+                                if bottle.location != nil, bottle.image != nil, bottle.storageError == nil {
+                                    Button("Eject") { model.ejectBottle(bottle.name) }
+                                }
                                 Divider()
+                                if bottle.location != nil {
+                                    Button("Remove from List…") { pendingForget = bottle.name }
+                                }
                                 Button("Delete Bottle…", role: .destructive) { pendingDelete = bottle.name }
                             }
                     }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if !model.foundOnDrives.isEmpty {
+                        FoundBottlesBanner()
+                    }
+                    Button {
+                        model.showingFindBottles = true
+                    } label: {
+                        Label("Find Bottles…", systemImage: "externaldrive.badge.magnifyingglass")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(model.project == nil)
+                    .help("Search connected drives (or a folder) for bottles that are not in the list, e.g. on a drive from another Mac")
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 230)
@@ -113,6 +139,7 @@ struct ContentView: View {
                     .disabled(model.runtime == nil)
                     .help("Create a winecx bottle")
                 }
+
             }
         } detail: {
             if model.isLocating {
@@ -136,6 +163,9 @@ struct ContentView: View {
         .sheet(isPresented: $showingNewBottle) {
             NewBottleSheet()
         }
+        .sheet(isPresented: $model.showingFindBottles) {
+            FindBottlesSheet()
+        }
         // First launch: open the tutorial once the checkout is located (its bottle step
         // needs the project), so it opens after the Desktop-folder permission prompt.
         .task(id: model.isLocating) {
@@ -158,7 +188,22 @@ struct ContentView: View {
                 pendingDelete = nil
             }
         } message: {
-            Text("Stops its wineserver and removes the whole prefix, including installed programs.")
+            if let bottle = model.bottle(named: pendingDelete), bottle.isUnreachable {
+                Text("'\(bottle.name)' lives on a drive that is not connected: only its entry in the list is removed, its files there are not touched.")
+            } else if let bottle = model.bottle(named: pendingDelete), let location = bottle.location {
+                Text("Stops its wineserver and removes the whole prefix, including installed programs, from \(location.path). To keep its files, use Remove from List instead.")
+            } else {
+                Text("Stops its wineserver and removes the whole prefix, including installed programs.")
+            }
+        }
+        .confirmationDialog("Remove '\(pendingForget ?? "")' from the list?",
+                            isPresented: Binding(get: { pendingForget != nil }, set: { if !$0 { pendingForget = nil } })) {
+            Button("Remove from List") {
+                if let name = pendingForget { model.forgetBottle(name) }
+                pendingForget = nil
+            }
+        } message: {
+            Text("Its files stay at \(model.bottle(named: pendingForget)?.location?.path ?? "their location"); Find Bottles adds it again, also on another Mac.")
         }
     }
 }
@@ -168,15 +213,18 @@ struct BottleRow: View {
     let bottle: Bottle
 
     private var subtitle: String {
+        if bottle.isUnreachable { return "\(model.locationText(bottle) ?? "drive") not connected" }
+        if bottle.isEjected { return "ejected · on \(model.locationText(bottle) ?? "another drive")" }
         if bottle.storageError != nil { return "disk image unavailable" }
         guard model.isDrivable(bottle) else { return "\(bottle.config.runtime) · bottle.sh only" }
         let disk = bottle.config.storage.map { " · \($0.sizeGB) GB" } ?? ""
-        return "\(bottle.config.runtime) · \(bottle.config.graphics.rawValue)\(disk)"
+        let place = model.locationText(bottle).map { " · on \($0)" } ?? ""
+        return "\(bottle.config.runtime) · \(bottle.config.graphics.rawValue)\(disk)\(place)"
     }
 
     var body: some View {
         HStack {
-            Image(systemName: "wineglass")
+            Image(systemName: bottle.location == nil ? "wineglass" : "externaldrive")
                 .foregroundStyle(model.isDrivable(bottle) ? Color.accentColor : .secondary)
             VStack(alignment: .leading, spacing: 1) {
                 Text(bottle.name)
@@ -200,10 +248,20 @@ struct NewBottleSheet: View {
     @State private var graphics: Graphics = .d3dmetal
     @State private var ownDisk = true
     @State private var sizeGB = BottleStorage.defaultGB
+    /// A folder elsewhere (an external drive) to keep the bottle in; nil: the bottles folder.
+    @State private var location: URL?
+    @State private var locationError: String?
 
     private var nameError: String? { model.newBottleNameError(name) }
-    private var sizeRange: ClosedRange<Int> { model.storageRange() }
+    private var sizeRange: ClosedRange<Int> { model.storageRange(home: location) }
     private var sizeValid: Bool { !ownDisk || sizeRange.contains(sizeGB) }
+    /// Why the chosen place cannot hold a folder bottle (exFAT, FAT, NTFS, network).
+    private var folderProblem: String? {
+        Runtime.folderBottleProblem(at: location ?? model.project?.bottles ?? URL(fileURLWithPath: "/"))
+    }
+    private var canCreate: Bool {
+        !name.isEmpty && nameError == nil && sizeValid && locationError == nil && (ownDisk || folderProblem == nil)
+    }
 
     static func runtimeTitle(_ rt: String) -> String {
         rt == "winecx-full" ? "winecx-full (Wine 10.0 + GStreamer, SDL2, MoltenVK)" : "winecx (Wine 10.0, CrossOver lineage)"
@@ -236,12 +294,38 @@ struct NewBottleSheet: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
+                LabeledContent("Location") {
+                    HStack {
+                        Picker("Location", selection: Binding(get: { location?.path ?? "" },
+                                                              set: { setLocation($0.isEmpty ? nil : URL(fileURLWithPath: $0)) })) {
+                            Text("Bottles folder").tag("")
+                            if let location {
+                                Text(location.path).tag(location.path)
+                            }
+                        }
+                        .labelsHidden()
+                        Button("Choose…", action: chooseLocation)
+                    }
+                }
+                if let locationError {
+                    Text(locationError).font(.caption).foregroundStyle(.red)
+                }
+            } footer: {
+                Text(location == nil
+                     ? "In \(model.project?.bottles.path ?? "the bottles folder"). Choose a folder to keep it elsewhere, e.g. on an external drive; it is listed here and runs from there while the drive is connected."
+                     : "The bottle goes to \(location!.appendingPathComponent(ownDisk ? "\(name.isEmpty ? "<name>" : name).sparsebundle" : (name.isEmpty ? "<name>" : name)).path) and runs from there while the drive is connected.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section {
                 Picker("Disk", selection: $ownDisk) {
                     Text("Its own disk").tag(true)
                     Text("Unlimited (a plain folder)").tag(false)
                 }
                 .pickerStyle(.radioGroup)
-                .disabled(model.defaultStorageGB == nil)
+                .disabled(model.defaultStorageGB(at: location) == nil)
+                if !ownDisk, let folderProblem {
+                    Text(folderProblem).font(.caption).foregroundStyle(.red)
+                }
                 if ownDisk {
                     StorageSizeField(sizeGB: $sizeGB, range: sizeRange)
                     if !sizeValid {
@@ -251,7 +335,7 @@ struct NewBottleSheet: View {
             } footer: {
                 Text(ownDisk
                      ? "Windows sees C: as a \(sizeGB) GB drive and the bottle can never take more. The disk image only uses the space actually written; resize it later on the bottle page."
-                     : "The bottle grows as far as this Mac's disk allows.")
+                     : "The bottle grows as far as \(location == nil ? "this Mac's disk" : "the drive") allows.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -269,11 +353,65 @@ struct NewBottleSheet: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Create") {
                     model.createBottle(name: name, runtime: runtimeName, graphics: graphics,
-                                       storageGB: ownDisk ? sizeGB : nil)
+                                       storageGB: ownDisk ? sizeGB : nil, location: location)
                     dismiss()
                 }
-                .disabled(name.isEmpty || nameError != nil || !sizeValid)
+                .disabled(!canCreate)
             }
         }
+    }
+
+    private func chooseLocation() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose where to keep the new bottle"
+        panel.prompt = "Choose"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = location ?? URL(fileURLWithPath: "/Volumes")
+        if panel.runModal() == .OK, let url = panel.url { setLocation(url) }
+    }
+
+    /// Checks the folder (CrossCore Runtime.checkLocation) and fits the disk choice to
+    /// it: the size range follows that drive's free space, and a drive that cannot hold
+    /// a folder bottle switches to a disk image.
+    private func setLocation(_ url: URL?) {
+        locationError = nil
+        guard let url, let runtime = model.runtime else { location = nil; refit(); return }
+        do {
+            location = try runtime.checkLocation(url)
+        } catch {
+            location = url
+            locationError = "\(error)"
+        }
+        refit()
+    }
+
+    private func refit() {
+        if !ownDisk, folderProblem != nil { ownDisk = true }
+        sizeGB = min(max(sizeGB, sizeRange.lowerBound), sizeRange.upperBound)
+    }
+}
+
+/// Bottles found on a drive that was just connected (AppModel.foundOnDrives).
+struct FoundBottlesBanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        let drives = Set(model.foundOnDrives.map { $0.url.pathComponents.count > 2 ? $0.url.pathComponents[2] : $0.url.path })
+        VStack(alignment: .leading, spacing: 6) {
+            Label("\(model.foundOnDrives.count) bottle\(model.foundOnDrives.count == 1 ? "" : "s") on \(drives.sorted().joined(separator: ", "))",
+                  systemImage: "externaldrive.badge.plus")
+                .font(.callout)
+            HStack {
+                Button("Review…") { model.showingFindBottles = true }
+                Button("Dismiss") { model.foundOnDrives = [] }
+            }
+            .controlSize(.small)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .padding(8)
     }
 }

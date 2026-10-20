@@ -66,10 +66,16 @@ final class AppModel: ObservableObject {
     @Published var steamChecking: Set<String> = []
     /// Use of each image-backed bottle's disk, refreshed with the Steam status.
     @Published private(set) var storageUsage: [String: StorageUsage] = [:]
-    /// Free space on the Mac's disk that holds bottles/ (shown for folder bottles).
-    @Published private(set) var hostFreeBytes: Int64 = 0
-    /// Bottles being resized or moved (folder <-> disk image), with the current step.
-    @Published private(set) var storageWork: [String: String] = [:]
+    /// Free space on the disk that holds each bottle (shown for folder bottles).
+    @Published private(set) var hostFree: [String: Int64] = [:]
+    /// Bottles being resized or moved (folder <-> disk image, to another folder or
+    /// drive), with the current step.
+    @Published var storageWork: [String: String] = [:]
+    /// Bottles found on a drive that was just connected and that are not listed yet
+    /// (AppModel+Location.swift); the sidebar offers to add them.
+    @Published var foundOnDrives: [FoundBottle] = []
+    /// Find Bottles sheet.
+    @Published var showingFindBottles = false
     /// Store ids running per bottle (process scan by exe name, AppModel+Stores.swift).
     @Published var storesRunning: [String: Set<String>] = [:]
     /// "<bottle>/<store id>" while that store's installer runs.
@@ -89,6 +95,10 @@ final class AppModel: ObservableObject {
     /// inside the checkout). Passed to Project.locate as CROSS_ROOT, never to Wine.
     static let rootOverrideKey = "crossRoot"
 
+    /// Settings > Paths override for the bottles folder (where new bottles go and where
+    /// the list is read from). Passed to Project.locate as CROSS_BOTTLES.
+    static let bottlesOverrideKey = "bottlesFolder"
+
     /// Set once the first-run tutorial has been shown. `CROSS_RESET_TUTORIAL=1` in the
     /// app's environment clears it at launch, so the tutorial opens again.
     static let tutorialShownKey = "tutorialShown"
@@ -105,6 +115,7 @@ final class AppModel: ObservableObject {
             UserDefaults.standard.removeObject(forKey: Self.tutorialShownKey)
         }
         locateProject()
+        observeVolumes()
     }
 
     // MARK: - First-run tutorial
@@ -171,6 +182,9 @@ final class AppModel: ObservableObject {
         var env = ProcessInfo.processInfo.environment
         if let root = UserDefaults.standard.string(forKey: Self.rootOverrideKey), !root.isEmpty {
             env["CROSS_ROOT"] = root
+        }
+        if let bottles = UserDefaults.standard.string(forKey: Self.bottlesOverrideKey), !bottles.isEmpty {
+            env["CROSS_BOTTLES"] = bottles
         }
         isLocating = true
         Task.detached {
@@ -600,27 +614,31 @@ final class AppModel: ObservableObject {
 
     /// The size a new bottle's disk image gets by default (nil: too little free space,
     /// the bottle becomes a plain folder).
-    var defaultStorageGB: Int? {
+    var defaultStorageGB: Int? { defaultStorageGB(at: nil) }
+
+    /// The default for a new bottle kept in `home` (nil: the bottles folder).
+    func defaultStorageGB(at home: URL?) -> Int? {
         guard let project else { return nil }
-        return Runtime.defaultStorageGB(project: project)
+        return Runtime.defaultStorageGB(project: project, home: home)
     }
 
-    /// Sizes the New Bottle sheet and the Change… sheet accept for `bottle` (or a new one).
-    func storageRange(for bottle: Bottle? = nil) -> ClosedRange<Int> {
+    /// Sizes the New Bottle sheet and the Change… sheet accept for `bottle` (or a new one
+    /// kept in `home`): the free space of the drive the image is (or goes) on.
+    func storageRange(for bottle: Bottle? = nil, home: URL? = nil) -> ClosedRange<Int> {
         guard let project else { return BottleStorage.minimumGB...BottleStorage.minimumGB }
-        guard let bottle else { return Runtime.storageRange(project: project) }
+        guard let bottle else { return Runtime.storageRange(project: project, home: home) }
         let used = storageUsage[bottle.name]?.used ?? bottle.storageUsage?.used ?? 0
-        return Runtime.storageRange(project: project, currentUse: used)
+        return Runtime.storageRange(project: project, currentUse: used, home: bottle.home(in: project))
     }
 
-    /// statfs of the bottle's volume and of the host disk, off the main thread.
+    /// statfs of the bottle's volume and of the disk that holds it, off the main thread.
     func refreshStorage(_ name: String) async {
         guard let bottle = bottle(named: name), let project else { return }
         let (usage, free) = await Task.detached {
-            (bottle.storageUsage, DiskImage.hostFreeBytes(at: project.bottles))
+            (bottle.storageUsage, DiskImage.hostFreeBytes(at: bottle.home(in: project)))
         }.value
         storageUsage[name] = usage
-        hostFreeBytes = free
+        hostFree[name] = free
     }
 
     /// Change… on the bottle page: resize an image, move a folder bottle into an image
@@ -675,14 +693,16 @@ final class AppModel: ObservableObject {
     /// the bottle shows up (with its log) right away.
     /// Returns the wineboot job (nil when the bottle could not be created).
     /// `storageGB`: size of the bottle's own disk image; nil makes a plain folder.
+    /// `location`: a folder elsewhere (an external drive) to keep it in; nil: the bottles folder.
     @discardableResult
-    func createBottle(name: String, runtime runtimeName: String? = nil, graphics: Graphics, storageGB: Int?) -> Job? {
+    func createBottle(name: String, runtime runtimeName: String? = nil, graphics: Graphics, storageGB: Int?,
+                      location: URL? = nil) -> Job? {
         guard let project else { alertMessage = loadError ?? "no project"; return nil }
         let runtimeName = runtimeName ?? Runtime.preferred(in: project)
         let runtime = Runtime(project: project, name: runtimeName)
         do {
             _ = try runtime.createBottle(name: name, config: BottleConfig(runtime: runtimeName, graphics: graphics),
-                                         storageGB: storageGB)
+                                         storageGB: storageGB, location: location)
         } catch {
             alertMessage = "\(error)"
             return nil

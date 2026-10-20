@@ -22,7 +22,9 @@ extension Runtime {
     /// Creates bottles/<name> with its cross.json (and .runtime). The prefix itself is
     /// initialised by running `wineboot(for:)` afterwards. With `storageGB` the bottle
     /// gets its own disk image of that size (Storage.swift); nil makes a plain folder.
-    public func createBottle(name: String, config: BottleConfig, storageGB: Int? = nil) throws -> Bottle {
+    /// `location`: a folder elsewhere (an external drive) to keep the bottle in, reached
+    /// through a link in the bottles folder (Location.swift); nil is the bottles folder.
+    public func createBottle(name: String, config: BottleConfig, storageGB: Int? = nil, location: URL? = nil) throws -> Bottle {
         guard Runtime.isKnown(config.runtime) else {
             throw CrossError("cross only creates \(Runtime.known.joined(separator: "/")) bottles (unknown runtime '\(config.runtime)')")
         }
@@ -31,25 +33,47 @@ extension Runtime {
         }
         try Bottle.validate(name: name)
         try check()
+        let fm = FileManager.default
         let prefix = project.bottles.appendingPathComponent(name)
-        guard !FileManager.default.fileExists(atPath: prefix.path) else {
-            throw CrossError("bottle '\(name)' already exists at \(prefix.path)")
+        for url in [prefix, Bottle.imageURL(name: name, in: project), Bottle.locationURL(name: name, in: project)]
+        where fm.fileExists(atPath: url.path) || Bottle.isSymlink(url) {
+            throw CrossError("bottle '\(name)' already exists (\(url.path))")
         }
+        let folder = try checkLocation(location)
+        let home = folder ?? project.bottles
         guard let storageGB else {
-            try FileManager.default.createDirectory(at: prefix, withIntermediateDirectories: true)
-            let bottle = Bottle(name: name, prefix: prefix, config: config)
-            try bottle.saveConfig()
+            try Runtime.checkFolderBottle(at: home)
+            try fm.createDirectory(at: project.bottles, withIntermediateDirectories: true)
+            let target = home.appendingPathComponent(name)
+            if folder != nil {
+                guard !fm.fileExists(atPath: target.path), !Bottle.isSymlink(target) else {
+                    throw CrossError("\(target.path) already exists")
+                }
+            }
+            try fm.createDirectory(at: target, withIntermediateDirectories: true)
+            let bottle = Bottle(name: name, prefix: prefix, config: config, location: folder == nil ? nil : target)
+            do {
+                if folder != nil {
+                    try fm.createSymbolicLink(at: prefix, withDestinationURL: target)
+                    try Bottle.recordLocation(target, name: name, in: project)
+                }
+                try bottle.saveConfig()
+            } catch {
+                try? Bottle.delete(bottle, in: project)
+                throw error
+            }
             return bottle
         }
-        try Runtime.checkSize(storageGB, in: Runtime.storageRange(project: project), what: "bottle '\(name)'")
-        let image = try createImage(for: name, prefix: prefix, sizeGB: storageGB)
+        try Runtime.checkSize(storageGB, in: Runtime.storageRange(project: project, home: home), what: "bottle '\(name)'")
+        let image = try createImage(for: name, prefix: prefix, sizeGB: storageGB, location: folder)
         var config = config
         config.storage = BottleStorage(image: image.lastPathComponent, sizeGB: storageGB)
-        let bottle = Bottle(name: name, prefix: prefix, config: config, image: image)
+        let bottle = Bottle(name: name, prefix: prefix, config: config, image: image,
+                            location: folder.map { $0.appendingPathComponent(image.lastPathComponent) })
         do {
             try bottle.saveConfig()
         } catch {
-            try? Bottle.delete(bottle)
+            try? Bottle.delete(bottle, in: project)
             throw error
         }
         return bottle

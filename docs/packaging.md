@@ -28,7 +28,8 @@ Sizes: app 1.4 GB, DMG 508 MB (UDZO).
 - `Project.locate()` checks `<exe>/../../SharedSupport/root` first; `Project.bundled` is then true.
 - Bottles and downloads go to `~/Library/Application Support/Gamify/{bottles,downloads}`
   (`Project.dataDir`); logs to `~/Library/Logs/Gamify`. `CROSS_BOTTLES` overrides the bottle dir
-  (its parent becomes the data dir), `CROSS_ROOT` overrides the root.
+  (only the bottles since 0.6; the app's Settings > Paths "Bottles folder" sets it), `CROSS_ROOT`
+  overrides the root.
 - `Runtime.preferred(in:)` picks the bundled runtime for new bottles when `winecx` is absent.
 - The root lives in **SharedSupport**, not Resources: codesign refuses nested code/frameworks
   (D3DMetal.framework) under Resources. Same layout as CrossOver.app.

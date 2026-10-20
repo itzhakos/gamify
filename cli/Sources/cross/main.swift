@@ -5,11 +5,16 @@ let usage = """
 cross - bottle manager and launcher for the winecx runtimes
 
   cross bottle create <name> [--runtime winecx|winecx-full] [--graphics d3dmetal|wined3d]
-                           [--storage <GB>|unlimited]
+                           [--storage <GB>|unlimited] [--location <folder>|default]
   cross bottle list
   cross bottle set <name> graphics <d3dmetal|wined3d>
   cross bottle set <name> storage <GB>|unlimited     (also: --storage <GB>)
+  cross bottle set <name> location <folder>|default  move the bottle (e.g. to an external drive)
   cross bottle delete <name>
+  cross bottle eject <name>                unmount a disk-image bottle so its drive can be disconnected
+  cross bottle forget <name>               take a bottle kept elsewhere off the list, keep its files
+  cross bottle find [<folder>...]          search connected drives (or folders) for bottles
+  cross bottle add <folder|image> [--name <name>]   list a bottle found elsewhere (e.g. a drive from another Mac)
   cross run   <bottle> <exe> [args...]     run a Windows exe (cwd = the exe's directory)
   cross cmd   <bottle> [args...]           run cmd.exe, e.g. cross cmd cx /c ver
   cross cfg   <bottle>                     open winecfg
@@ -29,7 +34,7 @@ cross - bottle manager and launcher for the winecx runtimes
   cross kill  <bottle>                     wineserver -k
   cross env   <bottle> [--export]          print the environment the bottle runs with
 
-Bottles live in bottles/<name>; per-bottle settings in bottles/<name>/cross.json.
+Bottles live in bottles/<name> (or are linked from there); per-bottle settings in bottles/<name>/cross.json.
 Storage: a new bottle gets its own disk of 64 GB by default (less when the disk has
 less free): an APFS sparse bundle bottles/<name>.sparsebundle mounted at bottles/<name>,
 so Windows sees a C: drive of that size and it only takes the space actually written.
@@ -37,6 +42,17 @@ so Windows sees a C: drive of that size and it only takes the space actually wri
 resizes an image (shrinking only above what is used), moves a folder bottle into a new
 image, or with `unlimited` moves an image bottle back into a folder; none of these run
 while programs are running in the bottle. Images are mounted on demand (after a reboot).
+Location: `--location <folder>` keeps the bottle in <folder>/<name> (or <folder>/<name>.sparsebundle)
+instead of the bottles folder, e.g. on an external drive; bottles/<name> (or <name>.sparsebundle)
+links to it and bottles/<name>.location records where it is. While that drive is not connected
+the bottle is listed as unavailable. Folder bottles need APFS or Mac OS Extended; on exFAT, FAT,
+NTFS or a network share use a disk image (--storage <GB>). `set location` copies the bottle there,
+verifies the copy, switches over and deletes the original (`default` moves it back).
+An image bottle on another drive stays mounted once used, which keeps that drive from being
+ejected: `cross bottle eject <name>` unmounts it until the bottle is used again. `find` looks
+through every connected local drive (3 folder levels deep) or the given folders for bottle
+folders and .sparsebundle images (looked into read-only); `add` lists one in the bottles folder.
+CROSS_BOTTLES=<folder> uses another bottles folder (downloads stay where they are).
 Stores: steam, epic (Epic Games Store), gog (GOG Galaxy), battlenet (Battle.net). Installers
 are cached in downloads/<store>/; install and installer output goes to
 ~/Library/Logs/Gamify/<bottle>/. Programs: shortcuts are read from the Start Menu and Desktop
@@ -73,6 +89,12 @@ func parseStorage(_ value: String) -> Int? {
     return gb
 }
 
+/// `--location` / `set location` values: a folder, or nil for the bottles folder.
+func parseLocation(_ value: String) -> URL? {
+    if ["default", "none", "-"].contains(value.lowercased()) { return nil }
+    return URL(fileURLWithPath: (value as NSString).expandingTildeInPath).standardizedFileURL
+}
+
 /// The storage column of `cross bottle list`.
 func storageText(_ bottle: Bottle) -> String {
     if let error = bottle.storageError { return "unavailable: \(error)" }
@@ -106,7 +128,8 @@ func main() throws {
         case "create":
             let name = requireArg(args, 1, "bottle name")
             var config = BottleConfig(runtime: Runtime.preferred(in: project))
-            var storageGB: Int? = Runtime.defaultStorageGB(project: project)
+            var storageGB: Int?? = nil   // nil: not given, the default for the location
+            var location: URL? = nil
             var i = 2
             while i < args.count {
                 switch args[i] {
@@ -117,7 +140,9 @@ func main() throws {
                     guard let graphics = Graphics(rawValue: g) else { fail("unknown graphics '\(g)' (d3dmetal|wined3d)") }
                     config.graphics = graphics; i += 2
                 case "--storage":
-                    storageGB = parseStorage(requireArg(args, i + 1, "storage size")); i += 2
+                    storageGB = .some(parseStorage(requireArg(args, i + 1, "storage size"))); i += 2
+                case "--location":
+                    location = parseLocation(requireArg(args, i + 1, "location folder")); i += 2
                 default: fail("unknown option '\(args[i])'")
                 }
             }
@@ -125,17 +150,20 @@ func main() throws {
                 fail("unknown runtime '\(config.runtime)' (\(Runtime.known.joined(separator: "|")))")
             }
             let runtime = Runtime(project: project, name: config.runtime)
-            let bottle = try runtime.createBottle(name: name, config: config, storageGB: storageGB)
+            let home = try runtime.checkLocation(location)
+            let sizeGB: Int? = storageGB ?? Runtime.defaultStorageGB(project: project, home: home)
+            let bottle = try runtime.createBottle(name: name, config: config, storageGB: sizeGB, location: home)
             let status = try runWaiting(try runtime.wineboot(for: bottle))
             guard status == 0 else { fail("wineboot --init failed with status \(status)") }
-            let storage = storageGB.map { "\($0) GB disk image" } ?? "folder"
-            print("bottle '\(name)' (\(config.runtime), \(config.graphics.rawValue), \(storage)) ready at \(bottle.prefix.path)")
+            let storage = sizeGB.map { "\($0) GB disk image" } ?? "folder"
+            print("bottle '\(name)' (\(config.runtime), \(config.graphics.rawValue), \(storage)) ready at \(bottle.location?.path ?? bottle.prefix.path)")
 
         case "list":
             for b in try Bottle.list(in: project) {
                 let graphics = Runtime.isKnown(b.config.runtime) ? b.config.graphics.rawValue : "-"
                 func pad(_ s: String, _ n: Int) -> String { s.count >= n ? s + " " : s.padding(toLength: n, withPad: " ", startingAt: 0) }
-                print(pad(b.name, 12) + pad(b.config.runtime, 12) + pad(graphics, 9) + storageText(b))
+                let location = b.location.map { "  (in \($0.deletingLastPathComponent().path))" } ?? ""
+                print(pad(b.name, 12) + pad(b.config.runtime, 12) + pad(graphics, 9) + storageText(b) + location)
             }
 
         case "set":
@@ -144,6 +172,12 @@ func main() throws {
             if key.hasPrefix("--") { key.removeFirst(2) }
             let value = requireArg(args, 3, "value")
             var bottle = try Bottle.load(name: name, in: project)
+            if key == "location" {
+                let runtime = try Runtime.forBottle(bottle, project: project)
+                bottle = try runtime.moveBottle(bottle, to: parseLocation(value), progress: { print($0) })
+                print("\(name): now in \(bottle.home(in: project).path) (\(storageText(bottle)))")
+                return
+            }
             if key == "storage" {
                 let runtime = try Runtime.forBottle(bottle, project: project)
                 let progress: (String) -> Void = { print($0) }
@@ -166,7 +200,7 @@ func main() throws {
             case "graphics":
                 guard let g = Graphics(rawValue: value) else { fail("unknown graphics '\(value)' (d3dmetal|wined3d)") }
                 bottle.config.graphics = g
-            default: fail("unknown setting '\(key)' (graphics, storage)")
+            default: fail("unknown setting '\(key)' (graphics, storage, location)")
             }
             try bottle.saveConfig()
             print("\(name): \(key) = \(value)")
@@ -177,8 +211,47 @@ func main() throws {
             guard let bottle = try Bottle.list(in: project).first(where: { $0.name == name }) else {
                 fail("no bottle '\(name)' in \(project.bottles.path)")
             }
+            let unreachable = bottle.isUnreachable
             try Runtime(project: project, name: bottle.config.runtime).deleteBottle(bottle)
-            print("deleted bottle '\(name)'")
+            if unreachable, let location = bottle.location {
+                print("removed '\(name)' from the bottles folder; its data at \(location.path) could not be reached and was not touched")
+            } else {
+                print("deleted bottle '\(name)'")
+            }
+
+        case "eject":
+            let name = requireArg(args, 1, "bottle name")
+            guard let bottle = try Bottle.list(in: project).first(where: { $0.name == name }) else {
+                fail("no bottle '\(name)' in \(project.bottles.path)")
+            }
+            try Runtime(project: project, name: bottle.config.runtime).ejectBottle(bottle)
+            print("ejected '\(name)'; it is mounted again when it is used")
+
+        case "forget":
+            let name = requireArg(args, 1, "bottle name")
+            guard let bottle = try Bottle.list(in: project).first(where: { $0.name == name }) else {
+                fail("no bottle '\(name)' in \(project.bottles.path)")
+            }
+            try Runtime(project: project, name: bottle.config.runtime).forgetBottle(bottle)
+            print("removed '\(name)' from the list; its files stay in \(bottle.location?.path ?? "?")")
+
+        case "find":
+            let folders = args.count > 1 ? args.dropFirst().map { parseLocation($0) ?? project.bottles } : Bottle.searchableVolumes()
+            print("searching " + (folders.isEmpty ? "(no connected drives)" : folders.map(\.path).joined(separator: ", ")))
+            for f in Bottle.find(in: folders, project: project) {
+                let kind = f.isImage ? "image " : "folder"
+                let what = f.config.map { "\($0.runtime), \($0.graphics.rawValue)" } ?? "no cross.json"
+                let state = f.registeredAs.map { "listed as '\($0)'" } ?? "not listed: cross bottle add '\(f.url.path)'"
+                print("\(kind)  \(f.url.path)  (\(what))  \(state)")
+            }
+
+        case "add":
+            let path = URL(fileURLWithPath: (requireArg(args, 1, "bottle folder or image") as NSString).expandingTildeInPath).standardizedFileURL
+            var name: String? = nil
+            if let i = args.firstIndex(of: "--name") { name = requireArg(args, i + 1, "name") }
+            let runtime = Runtime(project: project)
+            let bottle = try runtime.addBottle(at: path, name: name)
+            print("added '\(bottle.name)' (\(bottle.config.runtime), \(storageText(bottle))) from \(bottle.location?.path ?? path.path)")
 
         default:
             fail("unknown bottle subcommand '\(sub)'\n\n" + usage)

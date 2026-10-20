@@ -12,11 +12,15 @@ public struct Project {
     public let bundled: Bool
     /// Where bottles and downloads go (the checkout itself, or Application Support).
     public let dataDir: URL
+    /// The bottles folder when it is not `<dataDir>/bottles` (`CROSS_BOTTLES`, the app's
+    /// Settings > Paths "Bottles folder"). Downloads stay in the data dir.
+    public let bottlesOverride: URL?
 
-    public init(root: URL, bundled: Bool = false, dataDir: URL? = nil) {
+    public init(root: URL, bundled: Bool = false, dataDir: URL? = nil, bottles: URL? = nil) {
         self.root = root
         self.bundled = bundled
         self.dataDir = dataDir ?? (bundled ? Project.applicationSupport : root)
+        self.bottlesOverride = bottles
     }
 
     public static var applicationSupport: URL {
@@ -24,7 +28,11 @@ public struct Project {
     }
 
     public var runtimes: URL { root.appendingPathComponent("runtimes") }
-    public var bottles: URL { dataDir.appendingPathComponent("bottles") }
+    /// The registry of bottles: every bottle has its entry here, also one that lives
+    /// somewhere else (Location.swift).
+    public var bottles: URL { bottlesOverride ?? defaultBottles }
+    /// `<dataDir>/bottles`, the bottles folder without an override.
+    public var defaultBottles: URL { dataDir.appendingPathComponent("bottles") }
     public var downloads: URL { dataDir.appendingPathComponent("downloads") }
     public var webhelperShimDir: URL { root.appendingPathComponent("src/webhelper-shim") }
     public var webhelperShim: URL { webhelperShimDir.appendingPathComponent("steamwebhelper.exe") }
@@ -37,29 +45,29 @@ public struct Project {
     /// (`<App>.app/Contents/SharedSupport/root`); otherwise walk up from the executable,
     /// then from the current directory, until a directory that contains `runtimes/`
     /// and `scripts/` (or `cli/Package.swift`) is found. `CROSS_BOTTLES` overrides
-    /// where bottles are kept (its parent becomes the data dir).
+    /// where bottles are kept (only the bottles: downloads stay in the data dir).
     public static func locate(environment: [String: String] = ProcessInfo.processInfo.environment) throws -> Project {
-        var dataDir: URL? = nil
+        var bottles: URL? = nil
         if let b = environment["CROSS_BOTTLES"], !b.isEmpty {
-            dataDir = URL(fileURLWithPath: b).standardizedFileURL.deletingLastPathComponent()
+            bottles = URL(fileURLWithPath: (b as NSString).expandingTildeInPath).standardizedFileURL
         }
         if let explicit = environment["CROSS_ROOT"], !explicit.isEmpty {
             let url = URL(fileURLWithPath: explicit).standardizedFileURL
             guard looksLikeRoot(url) else { throw CrossError("CROSS_ROOT=\(explicit) is not a Cross checkout") }
-            return Project(root: url, bundled: isInsideBundle(url), dataDir: dataDir)
+            return Project(root: url, bundled: isInsideBundle(url), bottles: bottles)
         }
         let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         let exeDir = exe.deletingLastPathComponent()
         // Contents/MacOS/CrossApp -> Contents/SharedSupport/root
         if exeDir.lastPathComponent == "MacOS" {
             let bundledRoot = exeDir.deletingLastPathComponent().appendingPathComponent("SharedSupport/root")
-            if looksLikeRoot(bundledRoot) { return Project(root: bundledRoot, bundled: true, dataDir: dataDir) }
+            if looksLikeRoot(bundledRoot) { return Project(root: bundledRoot, bundled: true, bottles: bottles) }
         }
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         for start in [exeDir, cwd] {
             var dir = start.standardizedFileURL
             while true {
-                if looksLikeRoot(dir) { return Project(root: dir, bundled: false, dataDir: dataDir) }
+                if looksLikeRoot(dir) { return Project(root: dir, bundled: false, bottles: bottles) }
                 let parent = dir.deletingLastPathComponent()
                 if parent.path == dir.path { break }
                 dir = parent
