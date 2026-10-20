@@ -75,7 +75,12 @@ extension Runtime {
     }
 
     /// `cross steam`: installs the webhelper shim, resets ActiveProcess, clears stale
-    /// locks, then returns the steam.exe launch (blocks for the regedit run).
+    /// locks, then returns the steam.exe launch (blocks for the regedit run). With a
+    /// steam.exe already running (a second Launch, or `steam://` URLs) the new steam.exe
+    /// only hands its arguments to the running one, and the reset and lock cleanup are
+    /// skipped: the running client wrote its own pid at start and does not write it
+    /// again, so zeroing it made SteamAPI_Init fail in games built with older Steam SDKs
+    /// (SteamAPI_IsSteamRunning reads that pid) for the rest of the session.
     public func steam(in bottle: Bottle, arguments: [String],
                       base: [String: String] = ProcessInfo.processInfo.environment) throws -> Invocation {
         let steamExe = bottle.steamDir.appendingPathComponent("steam.exe")
@@ -84,8 +89,10 @@ extension Runtime {
         }
         let env = try environment(for: bottle, base: base)
         try Steam.installShim(in: bottle, project: project)
-        try Steam.resetActiveProcess(in: bottle, runtime: self, environment: env)
-        Steam.clearLocks(in: bottle)
+        if !Steam.processes(in: bottle).isRunning {
+            try Steam.resetActiveProcess(in: bottle, runtime: self, environment: env)
+            Steam.clearLocks(in: bottle)
+        }
         return Invocation(program: wine.path, arguments: ["steam.exe"] + Runtime.steamFlags + arguments,
                           environment: env, cwd: bottle.steamDir.path)
     }
