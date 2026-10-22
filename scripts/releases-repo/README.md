@@ -12,6 +12,9 @@ the source code lives in a separate repository.
    `xattr -dr com.apple.quarantine /Applications/Gamify.app` in Terminal, or open it once,
    then click **Open Anyway** in System Settings > Privacy & Security.
 
+Or with [Homebrew](https://brew.sh): `brew install --cask itzhakos/gamify/gamify`. It installs
+the same DMG into Applications; step 3 still applies, and Homebrew prints it after the install.
+
 Requirements: Apple Silicon, macOS 14 or later, Rosetta 2 (the app's first-run tutorial installs it).
 
 ## Updates

@@ -6,7 +6,8 @@ bottle, install Steam with one click, launch games.
 
 - Users: open `Gamify-<version>.dmg`, drag Gamify to Applications, right-click > Open the first time
   (the build is not notarized yet), follow the tutorial. Rosetta 2 is required; the tutorial
-  installs it.
+  installs it. Or with Homebrew: `brew install --cask itzhakos/gamify/gamify` (same DMG,
+  same one-time quarantine step, shown after the install).
 - Developers: `NOTES.md` (current state + the whole log), `docs/app.md` (GUI),
   `docs/packaging.md` (installer), `docs/runtime-full.md` (building the runtime),
   `docs/LICENSING.md` (what may be shipped). Build the CLI with `cd cli && swift build -c

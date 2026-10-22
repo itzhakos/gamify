@@ -144,9 +144,30 @@ What it does, in order:
 7. Syncs README/THIRD_PARTY_NOTICES/SOURCE_OFFER into the public repository
    (`scripts/releases-repo/`, cloned to `dist/gamify-releases`), then
    `gh release create v0.2 --repo itzhakos/gamify-releases` with the four assets.
+8. Unless `--draft`: sets `version` and `sha256` (of the DMG) in `Casks/gamify.rb` of the
+   Homebrew tap `itzhakos/homebrew-gamify` (cloned to `dist/homebrew-gamify`), commits
+   "gamify 0.2" and pushes.
 
 The public repository was created once with
 `gh repo create itzhakos/gamify-releases --public`.
+
+## Homebrew tap
+
+`brew install --cask itzhakos/gamify/gamify` installs the release DMG. The cask lives in
+the public repo `itzhakos/homebrew-gamify` (`Casks/gamify.rb`), created 2026-10-22 for 0.6.
+It declares `auto_updates true` (so `brew upgrade` leaves Gamify to its own updater unless
+`--greedy`), `depends_on arch: :arm64` and `macos: :sonoma`, and a `zap` of
+~/Library/Application Support/Gamify, Caches/Gamify and the `local.gamify.app` preferences
+and saved state. It does **not** clear the quarantine flag: Homebrew's policy is that casks
+never bypass Gatekeeper, so the caveats print the same `xattr` / Open Anyway step as the
+README. Once the app is notarized, drop that caveat.
+
+Verified 2026-10-22 (Homebrew 7.0.9): `brew style` and `brew audit --cask --online` clean;
+`brew tap itzhakos/gamify` from GitHub, then `brew install --cask --appdir=<temp>` downloaded
+and installed 0.6 (Info.plist 0.6, `codesign --verify --strict` OK, quarantine set as
+expected); `brew uninstall` removed it and left ~/Library/Application Support/Gamify alone.
+The release.sh sed was tested on a copy (0.7 + a dummy SHA: `brew style` clean). Not yet run
+inside a real release.
 
 ## Verified on GitHub (2026-10-17)
 

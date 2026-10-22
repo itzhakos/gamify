@@ -15,10 +15,12 @@
 #   CROSS_RUNTIME=winecx       passed through to package-app.sh
 #
 # Output in dist/release-<ver>/: Gamify-<ver>.dmg, Gamify-app-<ver>.zip,
-# Gamify-<ver>-source.tar.gz, latest.json.
+# Gamify-<ver>-source.tar.gz, latest.json. A non-draft publish also bumps the Homebrew cask
+# (itzhakos/homebrew-gamify, Casks/gamify.rb).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO=itzhakos/gamify-releases
+TAP=itzhakos/homebrew-gamify
 FEED="https://github.com/$REPO/releases/latest/download/latest.json"
 PLIST="$ROOT/app/Info.plist"
 
@@ -153,7 +155,7 @@ if [ "$MODE" = local ]; then
   exit 0
 fi
 
-log "push to origin (private)"
+log "push to origin"
 git push -q origin HEAD:main
 git push -q origin "$TAG"
 
@@ -175,3 +177,14 @@ Install: download Gamify-$VERSION.dmg, drag Gamify to Applications, then run \`x
 gh release create "$TAG" --repo "$REPO" --title "Gamify $VERSION" --notes "$NOTES" $DRAFT \
   "$OUT/Gamify-$VERSION.dmg" "$OUT/Gamify-app-$VERSION.zip" "$OUT/Gamify-$VERSION-source.tar.gz" "$OUT/latest.json"
 echo "published: https://github.com/$REPO/releases/tag/$TAG"
+
+if [ -z "$DRAFT" ]; then
+  log "Homebrew cask in $TAP"
+  BREW_TAP="$ROOT/dist/homebrew-gamify"
+  if [ -d "$BREW_TAP/.git" ]; then git -C "$BREW_TAP" pull -q --ff-only; else git clone -q "https://github.com/$TAP.git" "$BREW_TAP"; fi
+  DMG_SHA="$(shasum -a 256 "$OUT/Gamify-$VERSION.dmg" | cut -d' ' -f1)"
+  sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/; s/^  sha256 \".*\"/  sha256 \"$DMG_SHA\"/" "$BREW_TAP/Casks/gamify.rb"
+  git -C "$BREW_TAP" commit -q -m "gamify $VERSION" -- Casks/gamify.rb
+  git -C "$BREW_TAP" push -q origin HEAD
+  echo "brew install --cask itzhakos/gamify/gamify now installs $VERSION"
+fi
