@@ -6,6 +6,30 @@ D3DMetal 3.0 from GPTK) already contains, and what Gamify could implement. Resea
 nothing was changed in the runtime or the app. Verified facts are marked **verified**
 (checked on this machine today); the rest is from sources listed at the end.
 
+## Status (2026-10-22, evening)
+
+Stages 1 and 2 of the plan below are merged into `main` and live:
+- Per-bottle Performance settings (`performance` in cross.json, `cross bottle show|set`,
+  Performance box in the app, `cross cache clear`) and the DLSS→MetalFX plumbing: nvngx
+  names in `runtimes/d3dmetal`, `nvngx.dll`+`nvapi64.dll` in system32, `NGXCore\FullPath`,
+  `D3DM_ENABLE_METALFX=1`, `D3DM_VENDOR_ID=0x10DE` (metalfx is on by default for D3DMetal
+  bottles). docs/app.md "Performance settings".
+- `runtimes/winecx` and `runtimes/winecx-full` were rebuilt with three new `src/patches`
+  (HAGS reporting, XGETBV emulation, Game Mode plist keys) and swapped in; the previous
+  trees are kept as `runtimes/winecx-old` / `winecx-full-old` for rollback.
+  docs/codeweavers-patches.md "Ported from CrossOver 26.1", docs/runtime-full.md.
+- Verified on the new runtime: `hagstest` reports HwSchSupported/Enabled/EnabledByDefault
+  = 1 with D3DMetal (0 with `WINE_DISABLE_HARDWARE_SCHEDULING=1`); `d3d11test` reports
+  vendor 0x10de; msync runs; d3d12test FL 12_2 / SM 6.6 at ~120 fps.
+- Corrections to the text below: on macOS 27 Rosetta executes `XGETBV` itself (returns
+  xcr0 = 0x7 even with `ROSETTA_ADVERTISE_AVX=1`, and a 256-bit AVX add still works), so
+  the XGETBV patch only matters on older macOS; and the Game Mode plist keys are ignored
+  because macOS registers Wine processes as "wine" without a bundle id (Game Mode daemon
+  logs "Ignoring"), so Game Mode needs the loader inside a real .app bundle (not done).
+- Not done: DLSS/Frame Generation in a real game (no DLSS game installed; Split Fiction is
+  the candidate); DXMT/DXVK backends (separate session, in progress); lsfg-metal and
+  D3DMetal 4.0 beta trials.
+
 ## TL;DR
 
 1. **DLSS -> MetalFX, including Frame Generation, is already inside the D3DMetal 3.0 we

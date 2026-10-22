@@ -62,6 +62,14 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
+- **Runtimes rebuilt and swapped** (2026-10-22): `runtimes/winecx` and `runtimes/winecx-full` now
+  carry the three `src/patches` ported from CrossOver 26.1 (`win32u-d3dkmt-hwsched.patch` = HAGS
+  for DLSS Frame Generation, `ntdll-emulate-xgetbv.patch`, `loader-plist-gamemode.patch`); the
+  previous trees are `runtimes/winecx-old` / `winecx-full-old` (delete when 0.7 is out). Verified
+  after the swap: hagstest HwSch 1/1/1, d3d11test vendor 0x10de, msync, d3d12test FL 12_2.
+  Game Mode keys have no effect (macOS sees Wine processes as "wine" without a bundle id);
+  XGETBV emulation never runs on macOS 27 (Rosetta handles it). Status summary at the top of
+  docs/perf-research.md. DXMT/DXVK (branch claude/dxmt-dxvk-6b922e) still in progress.
 - **Performance settings** (2026-10-22, branch claude/perf-settings-e1520b, stage 1 of
   docs/perf-research.md): `performance` in cross.json (sync esync|msync, metalfx default on,
   avx, raytracing, maxFPS, hud, retina, vendorID) mapped to env vars in Runtime.environment

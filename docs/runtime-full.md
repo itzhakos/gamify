@@ -183,6 +183,10 @@ hand-installed `syswow64/dsound.dll`, its `.wine-x87.bak` and `DllOverrides "dso
 Portal 2 audio clean and Worms working; `runtimes/winecx-x87` / `winecx-full-x87` deleted.
 
 ## Ported from CrossOver 26.1: rebuild and swap (both runtimes, 2026-10-22)
+**Swapped in on 2026-10-22 (main session):** `winecx-next` -> `winecx`, `winecx-full-next` ->
+`winecx-full`; the previous trees are `winecx-old` / `winecx-full-old`; `build/x86_64-next` and
+`build/x86_64-full-next` were deleted (regenerable). Re-verified through the real project root.
+
 Three new `src/patches` (HAGS for D3DMetal, XGETBV emulation, Game Mode plist keys; details in
 docs/codeweavers-patches.md "Ported from CrossOver 26.1"). Built side by side, the live
 runtimes untouched:
