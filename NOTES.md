@@ -62,7 +62,13 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
-- **DXVK + DXMT** (2026-10-22, branch claude/dxmt-dxvk-6b922e, not wired into cli/app yet):
+- **Graphics backends wired** (2026-10-22, main): `graphics` is now d3dmetal|wined3d|dxvk|dxmt
+  (CrossCore `Backends.swift`: homes, `checkGraphics`, per-backend env, `prepareBackend`);
+  WINEDLLPATH is `<backend>:<rt>/lib/wined3d:<rt>/lib/wine` for every backend, the build
+  scripts and the live runtimes move d3d9 + all i386 d3d DLLs to lib/wined3d; CLI usage, app
+  pickers, Settings paths, package-app.sh (ships dxvk/dxmt when built), winecx-env.sh updated.
+  Verified all four with d3d11test 32/64 and d3d9test (docs/app.md "Graphics backends").
+- **DXVK + DXMT** (2026-10-22, branch claude/dxmt-dxvk-6b922e (wired, see above)):
   `runtimes/dxvk` = DXVK 1.10.3 from CrossOver's tree (`scripts/build-dxvk.sh`, mingw-w64,
   patches in scripts/dxvk-patches: GS/cull/tess optional for upstream MoltenVK) for D3D9/10/11
   32+64-bit over winecx-full's MoltenVK; `runtimes/dxmt` = DXMT v0.80 (last MIT, `scripts/build-dxmt.sh`

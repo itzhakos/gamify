@@ -3,8 +3,21 @@ import Foundation
 /// 64-bit DirectX 10/11/12 backend for a bottle. Exactly one of the two
 /// directories goes first in WINEDLLPATH (see Runtime.environment).
 public enum Graphics: String, Codable, CaseIterable {
-    case d3dmetal   // Apple D3DMetal 3.0 (runtimes/d3dmetal), the default
-    case wined3d    // Wine's own d3d*/dxgi, moved to runtimes/winecx/lib/wined3d
+    case d3dmetal   // Apple D3DMetal 3.0 (runtimes/d3dmetal), the default: DX11/DX12, 64-bit only
+    case wined3d    // Wine's own d3d9/d3d10*/d3d11/d3d12/dxgi, moved to <runtime>/lib/wined3d
+    case dxvk       // DXVK 1.10.3 (runtimes/dxvk): DX9/10/11, 32- and 64-bit, over MoltenVK (winecx-full)
+    case dxmt       // DXMT 0.80 (runtimes/dxmt): DX10/11 on Metal, 32- and 64-bit
+
+    /// "d3dmetal|wined3d|dxvk|dxmt" for usage texts.
+    public static var list: String { allCases.map(\.rawValue).joined(separator: "|") }
+    public var title: String {
+        switch self {
+        case .d3dmetal: return "D3DMetal"
+        case .wined3d: return "wined3d"
+        case .dxvk: return "DXVK"
+        case .dxmt: return "DXMT"
+        }
+    }
 }
 
 /// Per-bottle settings, stored as `bottles/<name>/cross.json`.

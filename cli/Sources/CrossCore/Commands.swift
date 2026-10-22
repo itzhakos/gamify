@@ -33,6 +33,7 @@ extension Runtime {
         }
         try Bottle.validate(name: name)
         try check()
+        try checkGraphics(config.graphics)
         if config.graphics == .d3dmetal && config.performance.metalfx {
             // before wineboot, which fills system32 from WINEDLLPATH (nvngx.dll included)
             do { try ensureNVNGXNames() } catch { warn("cannot add nvngx.dll/nvngx.so to \(d3dmetalHome.path): \(error)") }

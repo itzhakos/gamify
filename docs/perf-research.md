@@ -26,8 +26,12 @@ Stages 1 and 2 of the plan below are merged into `main` and live:
   the XGETBV patch only matters on older macOS; and the Game Mode plist keys are ignored
   because macOS registers Wine processes as "wine" without a bundle id (Game Mode daemon
   logs "Ignoring"), so Game Mode needs the loader inside a real .app bundle (not done).
+- DXVK 1.10.3 and DXMT 0.80 are built (`scripts/build-dxvk.sh`, `scripts/build-dxmt.sh`) and
+  selectable as `graphics` dxvk / dxmt per bottle (docs/dxmt-dxvk.md, docs/app.md "Graphics
+  backends"). Battle.net's 32-bit CEF now gets a GPU path on DXVK, but its login page still
+  shows the spinner because of a renderer-process CHECK that is not graphics related.
 - Not done: DLSS/Frame Generation in a real game (no DLSS game installed; Split Fiction is
-  the candidate); DXMT/DXVK backends (separate session, in progress); lsfg-metal and
+  the candidate); real-game comparisons of D3DMetal vs DXMT vs DXVK; lsfg-metal and
   D3DMetal 4.0 beta trials.
 
 ## TL;DR

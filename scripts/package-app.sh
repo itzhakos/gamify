@@ -51,6 +51,11 @@ if [ -f "$D3DM/x86_64-windows/nvngx-on-metalfx.dll" ]; then
     [ -f "$D3DM/x86_64-windows/nvngx.dll" ] || cp "$D3DM/x86_64-windows/nvngx-on-metalfx.dll" "$D3DM/x86_64-windows/nvngx.dll"
     ln -sfn libd3dshared.dylib "$D3DM/x86_64-unix/nvngx.so"
 fi
+# DXVK (DX9/10/11 over MoltenVK, 32+64-bit) and DXMT (DX10/11 on Metal): optional backends,
+# shipped when built (scripts/build-dxvk.sh, scripts/build-dxmt.sh; docs/dxmt-dxvk.md).
+for b in dxvk dxmt; do
+    [ -d "$ROOT/runtimes/$b" ] && cp -R "$ROOT/runtimes/$b" "$R/runtimes/$b"
+done
 cp "$ROOT/src/webhelper-shim/steamwebhelper.exe" "$R/src/webhelper-shim/"
 cp "$ROOT/src/steam-probe/steam-probe.exe" "$APP/Contents/Resources/"
 cp "$ROOT/scripts/winecx-env.sh" "$R/scripts/"        # Project.looksLikeRoot wants runtimes/ + scripts/

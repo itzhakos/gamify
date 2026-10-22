@@ -1024,3 +1024,56 @@ cross cache clear <bottle> [<exe name>]            without an exe: list the cach
   this Mac (Split Fiction, the natural test, was in bottle `cx`, not on disk; only its
   shader cache is). Expected check: turn DLSS on in the game with the Metal HUD on; the HUD
   shows MetalFX. Frame generation also needs macOS 26+ and the stage 2 Wine patch.
+
+## Graphics backends: DXVK and DXMT (2026-10-22)
+
+Four backends per bottle (`graphics` in cross.json, `cross bottle set <name> graphics
+<d3dmetal|wined3d|dxvk|dxmt>`, the segmented picker on the bottle page and in New Bottle):
+
+| Backend | Covers | Folder | Notes |
+|---|---|---|---|
+| `d3dmetal` (default) | DX11/DX12, 64-bit; DX9 and 32-bit fall back to wined3d | `runtimes/d3dmetal` | DLSS -> MetalFX (Performance settings) |
+| `wined3d` | Wine's own d3d9/d3d10*/d3d11/d3d12/dxgi (Vulkan renderer over MoltenVK on winecx-full, FL 9_3) | `<runtime>/lib/wined3d` | |
+| `dxvk` | DX9/10/11, 32- and 64-bit, over MoltenVK | `runtimes/dxvk` | winecx-full bottles only (refused on winecx: "DXVK needs Vulkan") |
+| `dxmt` | DX10/11, 32- and 64-bit, directly on Metal | `runtimes/dxmt` | `metalfx` on -> `DXMT_ENABLE_NVEXT=1` (DLSS -> MetalFX temporal scaler, 64-bit) |
+
+Build and background: docs/dxmt-dxvk.md (`scripts/build-dxvk.sh`, `scripts/build-dxmt.sh`).
+
+### Runtime layout
+ntdll searches `<runtime>/lib/wine` before any WINEDLLPATH entry, so the build scripts move
+Wine's `d3d9 d3d10 d3d10_1 d3d10core d3d11 d3d12 dxgi` of **both** PE arches to
+`<runtime>/lib/wined3d` (before 2026-10-22: x86_64 only, no d3d9). Every backend then gets
+`WINEDLLPATH=<backend>:<runtime>/lib/wined3d:<runtime>/lib/wine` (wined3d: the last two), with
+`lib/wined3d` as the fallback for what the backend lacks. The live `runtimes/winecx*` were
+changed with the same `mv`; `scripts/winecx-env.sh` mirrors the layout.
+
+### CrossCore (`Backends.swift`)
+- `Runtime.dxvkHome` / `dxmtHome` (`runtimes/dxvk`, `runtimes/dxmt`, also under the bundled
+  app's root; `scripts/package-app.sh` ships them when built), `hasMoltenVK`,
+  `availableGraphics`, `checkGraphics(_:)` (called by `environment(for:)`, `createBottle`,
+  `cross bottle set graphics`): a backend that is not built, or DXVK without MoltenVK, is an error.
+- `environment(for:)`: the WINEDLLPATH above; `CX_APPLEGPTK_LIBD3DSHARED_PATH` only for
+  d3dmetal; DXVK: `DXVK_CONFIG_FILE=runtimes/dxvk/dxvk.conf`, `DXVK_STATE_CACHE_PATH` and
+  `DXVK_LOG_PATH` = `<prefix>/cache/dxvk` (otherwise they land next to the game's .exe),
+  `WINEDLLOVERRIDES` gets `vulkan-1=b` (an app's own Vulkan loader, e.g. Battle.net's,
+  recurses through DXVK's dxgi); DXMT: `DXMT_CONFIG_FILE=runtimes/dxmt/dxmt.conf` and, with
+  `metalfx` on, `DXMT_ENABLE_NVEXT=1` (from `PerformanceSettings.environment`).
+- `prepareBackend` (run by `applyPerformance`: create, settings change, before every launch):
+  DXMT needs `winemetal.dll` in `system32` and `syswow64` (Wine loads a builtin only when its
+  file exists in the prefix; plus `nvapi64.dll`/`nvngx.dll` from DXMT with metalfx on); DXVK
+  gets its `cache/dxvk` folder.
+
+### Verified (2026-10-22, scratch bottle `bk` on winecx-full, CROSS_BOTTLES in a scratch dir)
+`cross bottle set bk graphics <g>` then `d3d11test.exe` (64-bit), `d3d11test32.exe`, `d3d9test.exe`:
+
+| | d3dmetal | dxvk | dxmt | wined3d |
+|---|---|---|---|---|
+| d3d11 64-bit | AMD Compatibility Mode, vendor 0x10de, FL 11_0 | Apple M4 Max, FL 11_0 | Apple M4 Max, vendor 0x10de (NVEXT), FL 11_0 (max 11_1) | Apple M4 Max, FL 9_3 |
+| d3d11 32-bit | wined3d fallback, FL 9_3 | FL 11_0 | FL 11_0 | FL 9_3 |
+| d3d9 32-bit | wined3d fallback | DXVK, triangle drawn | wined3d fallback | wined3d |
+
+`cross env bk` shows the variables of the table above per backend; `bottle set` printed
+"created cache/dxvk" and "copied winemetal.dll into system32/syswow64 (DXMT)" once;
+`cross bottle create bk2 --runtime winecx --graphics dxvk` is refused with the MoltenVK message.
+The app builds; its picker and New Bottle sheet list all four. Not tested: real games on
+DXVK/DXMT (a clear-only test cannot rank the backends; all sit at the display's refresh cap).

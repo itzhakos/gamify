@@ -285,6 +285,8 @@ struct NewBottleSheet: View {
                 Picker("Graphics", selection: $graphics) {
                     Text("D3DMetal 3.0").tag(Graphics.d3dmetal)
                     Text("wined3d").tag(Graphics.wined3d)
+                    Text("DXVK").tag(Graphics.dxvk)
+                    Text("DXMT").tag(Graphics.dxmt)
                 }
                 .pickerStyle(.radioGroup)
             } header: {

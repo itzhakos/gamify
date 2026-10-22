@@ -4,11 +4,13 @@ import CrossCore
 let usage = """
 cross - bottle manager and launcher for the winecx runtimes
 
-  cross bottle create <name> [--runtime winecx|winecx-full] [--graphics d3dmetal|wined3d]
+  cross bottle create <name> [--runtime winecx|winecx-full] [--graphics d3dmetal|wined3d|dxvk|dxmt]
                            [--storage <GB>|unlimited] [--location <folder>|default]
   cross bottle list
   cross bottle show <name>                 settings of one bottle (runtime, graphics, disk, performance)
-  cross bottle set <name> graphics <d3dmetal|wined3d>
+  cross bottle set <name> graphics <d3dmetal|wined3d|dxvk|dxmt>
+                                           d3dmetal: DX11/12 (64-bit); dxvk: DX9/10/11 32+64-bit over
+                                           MoltenVK (winecx-full); dxmt: DX10/11 32+64-bit on Metal
   cross bottle set <name> sync esync|msync           Windows sync objects: esync (default) or msync
   cross bottle set <name> metalfx on|off             DLSS through MetalFX (D3DMetal; default on)
   cross bottle set <name> avx on|off                 advertise AVX/AVX2 to games (ROSETTA_ADVERTISE_AVX)
@@ -193,7 +195,7 @@ func main() throws {
                     config.runtime = requireArg(args, i + 1, "runtime"); i += 2
                 case "--graphics":
                     let g = requireArg(args, i + 1, "graphics")
-                    guard let graphics = Graphics(rawValue: g) else { fail("unknown graphics '\(g)' (d3dmetal|wined3d)") }
+                    guard let graphics = Graphics(rawValue: g) else { fail("unknown graphics '\(g)' (\(Graphics.list))") }
                     config.graphics = graphics; i += 2
                 case "--storage":
                     storageGB = .some(parseStorage(requireArg(args, i + 1, "storage size"))); i += 2
@@ -268,7 +270,8 @@ func main() throws {
             }
             switch key.lowercased() {
             case "graphics":
-                guard let g = Graphics(rawValue: value) else { fail("unknown graphics '\(value)' (d3dmetal|wined3d)") }
+                guard let g = Graphics(rawValue: value) else { fail("unknown graphics '\(value)' (\(Graphics.list))") }
+                try Runtime.forBottle(bottle, project: project).checkGraphics(g)
                 bottle.config.graphics = g
             case "sync":
                 guard let mode = SyncMode(rawValue: value.lowercased()) else { fail("sync must be esync or msync, not '\(value)'") }

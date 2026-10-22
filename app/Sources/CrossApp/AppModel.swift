@@ -690,7 +690,7 @@ final class AppModel: ObservableObject {
             alertMessage = "\(error)"
         }
         reloadBottles()
-        if graphics == .d3dmetal { applyPerformance(to: bottle) }   // nvngx.dll + NGXCore for MetalFX
+        applyPerformance(to: bottle)   // nvngx.dll + NGXCore for MetalFX, winemetal.dll for DXMT, cache dir for DXVK
     }
 
     /// `cross bottle create`: writes cross.json, then runs wineboot --init as a job so

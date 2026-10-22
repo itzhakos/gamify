@@ -28,13 +28,21 @@ export D3DMETAL_HOME="${D3DMETAL_HOME:-$_root/runtimes/d3dmetal}"
 # looks for the matching unix lib at "<entry>/x86_64-unix/<name>.so". Pointing at
 # the x86_64-windows dir itself finds the DLL but then looks for the .so next to
 # it ("d3d11.dll failed to initialize, c0000142" with D3DMetal).
+# Since 2026-10-22 the build moves d3d9 and the i386 DLLs aside too, and every backend
+# (d3dmetal, dxvk = runtimes/dxvk, dxmt = runtimes/dxmt) is <backend>:lib/wined3d:lib/wine,
+# with lib/wined3d as the fallback for what the backend lacks (docs/dxmt-dxvk.md). The
+# CLI/app (CrossCore Runtime.environment) also set the backend's extra variables (DXVK:
+# DXVK_CONFIG_FILE, WINEDLLOVERRIDES vulkan-1=b; DXMT: DXMT_CONFIG_FILE); this script does
+# not, it is the reference for the Wine side only.
 export WINECX_GRAPHICS="${WINECX_GRAPHICS:-d3dmetal}"
 case "$WINECX_GRAPHICS" in
-  d3dmetal) _d3d="$D3DMETAL_HOME" ;;
-  wined3d)  _d3d="$WINECX_HOME/lib/wined3d" ;;
-  *) echo "winecx-env: unknown WINECX_GRAPHICS='$WINECX_GRAPHICS' (d3dmetal|wined3d)" >&2; _d3d="$D3DMETAL_HOME" ;;
+  d3dmetal) _d3d="$D3DMETAL_HOME:" ;;
+  wined3d)  _d3d="" ;;
+  dxvk)     _d3d="$_root/runtimes/dxvk:" ;;
+  dxmt)     _d3d="$_root/runtimes/dxmt:" ;;
+  *) echo "winecx-env: unknown WINECX_GRAPHICS='$WINECX_GRAPHICS' (d3dmetal|wined3d|dxvk|dxmt)" >&2; _d3d="$D3DMETAL_HOME:" ;;
 esac
-export WINEDLLPATH="$_d3d:$WINECX_HOME/lib/wine"
+export WINEDLLPATH="${_d3d}$WINECX_HOME/lib/wined3d:$WINECX_HOME/lib/wine"
 unset _d3d
 
 # CW HACK 22434: ntdll dlopens this at startup and registers D3DMetal's JIT

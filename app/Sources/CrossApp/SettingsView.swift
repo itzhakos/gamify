@@ -133,6 +133,8 @@ struct PathsTab: View {
                 }
                 pathRow("D3DMetal", model.runtime?.d3dmetalHome)
                 pathRow("wined3d", model.runtime?.wined3dDir)
+                pathRow("DXVK", model.runtime?.dxvkHome)
+                pathRow("DXMT", model.runtime?.dxmtHome)
                 pathRow("Webhelper shim", model.project?.webhelperShim)
                 pathRow("Third-party notices", model.project?.notices)
                 LabeledContent("Rosetta 2", value: model.rosettaInstalled ? "installed" : "missing")

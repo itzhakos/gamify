@@ -17,8 +17,9 @@ public enum SyncMode: String, Codable, CaseIterable {
 public struct PerformanceSettings: Codable, Equatable {
     /// WINEESYNC=1 or WINEMSYNC=1 (exactly one).
     public var sync: SyncMode = .esync
-    /// D3DMetal only: DLSS calls go to Apple's MetalFX bridge (nvngx.dll), the adapter
-    /// reports an NVIDIA vendor id (Streamline-based games require NVIDIA).
+    /// D3DMetal: DLSS calls go to Apple's MetalFX bridge (nvngx.dll), the adapter reports an
+    /// NVIDIA vendor id (Streamline-based games require NVIDIA). DXMT: DXMT_ENABLE_NVEXT=1
+    /// (its own NGX shim -> MetalFX temporal scaler). wined3d/DXVK: no effect.
     public var metalfx: Bool = true
     /// ROSETTA_ADVERTISE_AVX=1: Rosetta reports AVX/AVX2 in cpuid.
     public var avx: Bool = false
@@ -79,6 +80,8 @@ public struct PerformanceSettings: Codable, Equatable {
             "D3DM_VENDOR_ID": effectiveVendorID(graphics: graphics).map(PerformanceSettings.hex),
             "D3DM_SUPPORT_DXR": nil,
             "D3DM_MAX_FPS": nil,
+            // DXMT's NVIDIA extensions: nvapi + its NGX shim (DLSS -> MetalFX temporal scaler)
+            "DXMT_ENABLE_NVEXT": graphics == .dxmt && metalfx ? "1" : nil,
         ]
         if d3dmetal, let raytracing { env["D3DM_SUPPORT_DXR"] = raytracing ? "1" : "0" }
         if d3dmetal, let maxFPS, maxFPS > 0 { env["D3DM_MAX_FPS"] = String(maxFPS) }
@@ -127,7 +130,7 @@ extension Runtime {
     public func graphics(for bottle: Bottle, base: [String: String] = ProcessInfo.processInfo.environment) throws -> Graphics {
         guard let override = base["WINECX_GRAPHICS"], !override.isEmpty else { return bottle.config.graphics }
         guard let g = Graphics(rawValue: override) else {
-            throw CrossError("unknown WINECX_GRAPHICS='\(override)' (d3dmetal|wined3d)")
+            throw CrossError("unknown WINECX_GRAPHICS='\(override)' (\(Graphics.list))")
         }
         return g
     }
@@ -151,7 +154,9 @@ extension Runtime {
         let perf = bottle.config.performance
         var done: [String] = []
         var values: [Store.RegistryValue] = []
-        if try graphics(for: bottle, base: base) == .d3dmetal && perf.metalfx {
+        let graphics = try graphics(for: bottle, base: base)
+        done += try prepareBackend(graphics, bottle: bottle)
+        if graphics == .d3dmetal && perf.metalfx {
             do {
                 done += try ensureNVNGXNames()
             } catch {

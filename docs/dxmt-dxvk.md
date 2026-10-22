@@ -14,6 +14,12 @@ winecx-full with the proposed layout (below).
 
 ## TL;DR for the main session
 
+**Status (2026-10-22, main session):** wired. `Graphics` has `dxvk` and `dxmt`
+(`cli/Sources/CrossCore/Backends.swift`), the build scripts carry the layout change (the
+proposed patch was applied and removed), the live `runtimes/winecx*` were re-laid-out with the
+`mv` below, and all four backends were re-verified through `cross` (docs/app.md "Graphics
+backends: DXVK and DXMT"). The "how to wire" notes below are kept as the design record.
+
 1. The backends work: `d3d11test` 64-bit and 32-bit on DXVK and DXMT, `d3d9test` 32/64-bit on
    DXVK: real frames (screenshots), FL 11_0, "Apple M4 Max".
 2. Wiring needs **one runtime layout change** (Wine's i386 d3d DLLs and d3d9 must move to

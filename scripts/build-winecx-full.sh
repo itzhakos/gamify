@@ -96,10 +96,17 @@ ln -sf wine "$PREFIX/bin/wineloader"
 # runtimes/d3dmetal first in WINEDLLPATH is NOT enough: Wine's own d3d11/d3d12/
 # dxgi would always win. Move the DLLs that D3DMetal replaces to a side dir;
 # scripts/winecx-env.sh picks d3dmetal or wined3d by putting one of the two
-# dirs into WINEDLLPATH. (64-bit only: D3DMetal has no i386 DLLs, like CrossOver.)
-mkdir -p "$PREFIX/lib/wined3d/x86_64-windows"
-for d in d3d10 d3d10_1 d3d10core d3d11 d3d12 dxgi; do
-  [ -f "$PREFIX/lib/wine/x86_64-windows/$d.dll" ] && mv -f "$PREFIX/lib/wine/x86_64-windows/$d.dll" "$PREFIX/lib/wined3d/x86_64-windows/"
+# dirs into WINEDLLPATH.
+# Both PE arches and d3d9 too (2026-10-22, docs/dxmt-dxvk.md "Runtime layout"): DXVK
+# (d3d9/d3d10core/d3d11/dxgi, i386 + x86_64) and DXMT (d3d10core/d3d11/dxgi, i386 + x86_64)
+# are selected the same way, so Wine's copies of everything they replace must not sit in
+# lib/wine. Every backend then uses WINEDLLPATH=<backend>:lib/wined3d:lib/wine, with
+# lib/wined3d as the fallback for what the backend lacks (D3DMetal: all of i386 and d3d9).
+for arch in x86_64-windows i386-windows; do
+  mkdir -p "$PREFIX/lib/wined3d/$arch"
+  for d in d3d9 d3d10 d3d10_1 d3d10core d3d11 d3d12 dxgi; do
+    [ -f "$PREFIX/lib/wine/$arch/$d.dll" ] && mv -f "$PREFIX/lib/wine/$arch/$d.dll" "$PREFIX/lib/wined3d/$arch/"
+  done
 done
 echo "=== $(date '+%H:%M:%S') done -> $PREFIX"
 ls "$PREFIX/lib/wine"

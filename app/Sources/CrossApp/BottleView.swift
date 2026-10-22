@@ -392,12 +392,11 @@ struct BottleView: View {
             if drivable {
                 Picker("Graphics", selection: Binding(get: { bottle.config.graphics },
                                                       set: { model.setGraphics($0, for: bottle.name) })) {
-                    Text("D3DMetal").tag(Graphics.d3dmetal)
-                    Text("wined3d").tag(Graphics.wined3d)
+                    ForEach(Graphics.allCases, id: \.self) { g in Text(g.title).tag(g) }
                 }
                 .pickerStyle(.segmented)
-                .frame(width: 220)
-                .help("DirectX 10/11/12 backend (first entry in WINEDLLPATH); applies to programs started afterwards")
+                .frame(width: 320)
+                .help("DirectX backend, applies to programs started afterwards. D3DMetal: DX11/12, 64-bit. wined3d: Wine's own. DXVK: DX9/10/11, 32- and 64-bit, over MoltenVK (winecx-full bottles). DXMT: DX10/11, 32- and 64-bit, on Metal.")
             }
             Button {
                 model.reveal(bottle.driveC)

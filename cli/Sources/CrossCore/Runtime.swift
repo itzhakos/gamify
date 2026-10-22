@@ -125,6 +125,8 @@ public struct Runtime {
         switch graphics {
         case .d3dmetal: return d3dmetalHome
         case .wined3d: return wined3dDir
+        case .dxvk: return dxvkHome
+        case .dxmt: return dxmtHome
         }
     }
 
@@ -142,10 +144,21 @@ public struct Runtime {
         env["WINECX_HOME"] = home.path
         env["D3DMETAL_HOME"] = d3dmetalHome.path
         env["WINECX_GRAPHICS"] = graphics.rawValue
-        env["WINEDLLPATH"] = [graphicsDir(graphics).path, dllDir.path].joined(separator: ":")
+        // Every backend: <backend>:lib/wined3d:lib/wine. ntdll searches lib/wine first, so
+        // the build moves Wine's d3d9/d3d10*/d3d11/d3d12/dxgi (both arches) to lib/wined3d,
+        // the fallback for what a backend lacks (D3DMetal: all of i386 and d3d9).
+        try checkGraphics(graphics)
+        var dllPath = [wined3dDir.path, dllDir.path]
+        if graphics != .wined3d { dllPath.insert(graphicsDir(graphics).path, at: 0) }
+        env["WINEDLLPATH"] = dllPath.joined(separator: ":")
         // CW HACK 22434: ntdll dlopens this (lazily, on the first native PE load) and
-        // registers D3DMetal's JIT code regions with Rosetta.
-        env["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = d3dUnix.appendingPathComponent("libd3dshared.dylib").path
+        // registers D3DMetal's JIT code regions with Rosetta. D3DMetal only.
+        if graphics == .d3dmetal {
+            env["CX_APPLEGPTK_LIBD3DSHARED_PATH"] = d3dUnix.appendingPathComponent("libd3dshared.dylib").path
+        } else {
+            env.removeValue(forKey: "CX_APPLEGPTK_LIBD3DSHARED_PATH")
+        }
+        for (key, value) in backendEnvironment(graphics, bottle: bottle, base: base) { env[key] = value }
         // gnutls/freetype are dlopened by leaf name and the D3DMetal .so files reference
         // @rpath/libd3dshared.dylib + D3DMetal.framework.
         env["DYLD_FALLBACK_LIBRARY_PATH"] = [
