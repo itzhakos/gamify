@@ -53,6 +53,14 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
+- **Performance research** (2026-10-22, docs/perf-research.md): the D3DMetal 3.0 we ship already
+  bridges DLSS to MetalFX, including DLSS Frame Generation -> `MTLFXFrameInterpolator`
+  (binary evidence; macOS 26+). Missing on our side: `nvngx-on-metalfx.{dll,so}` renamed to
+  `nvngx`, `nvngx.dll`+`nvapi64.dll` in system32, `NGXCore\FullPath` registry value,
+  `D3DM_ENABLE_METALFX=1`, `D3DM_VENDOR_ID=0x10DE` (verified: vendor becomes 0x10de), and
+  CrossOver 26's CW HACK 24905 (HAGS in win32u d3dkmt.c; our Wine 10 stub returns
+  NOT_IMPLEMENTED) for frame generation. msync verified working on our wineserver. Nothing
+  changed yet; the doc has the staged plan (per-bottle performance settings first).
 - **Bottles**: `cx` (Steam signed in, Order of the Sinking Star at 60 fps) and `full` (winecx-full).
   On 2026-10-19 the checkout's bottles/ held only `steamtest` (winecx-full, 21 GB, folder) and
   the installed 0.3 app's ~/Library/Application Support/Gamify/bottles held `Steam` (folder,
@@ -72,7 +80,7 @@ What is live, in one place; everything below it is the chronological log (dead e
   0.1 installed from GitHub updated itself to 0.2. docs/updates.md.
 - **Repository**: https://github.com/itzhakos/gamify (private, since 2026-10-17). Sources, scripts
   and docs only; runtimes/bottles/downloads/upstream/dist are rebuilt locally (see README.md).
-- **Docs**: README.md, docs/app.md, docs/packaging.md, docs/runtime-full.md, docs/d3dmetal3.md,
+- **Docs**: README.md, docs/app.md, docs/packaging.md, docs/runtime-full.md, docs/d3dmetal3.md, docs/perf-research.md,
   docs/LICENSING.md, docs/codeweavers-patches.md, docs/portal2-audio.md.
 - Retired on 2026-10-17: build trees (`build/`, 7 GB, regenerable), source tarballs, test .exe
   files (`make` rebuilds them), scripts/bottle.sh. Deleted the same day with the user's OK: the
