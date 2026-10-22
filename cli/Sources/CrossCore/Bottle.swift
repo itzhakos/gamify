@@ -13,11 +13,24 @@ public struct BottleConfig: Codable, Equatable {
     public var graphics: Graphics = .d3dmetal
     /// Set for bottles backed by a disk image (Storage.swift); absent for folder bottles.
     public var storage: BottleStorage?
+    /// Sync, DLSS via MetalFX, AVX, ray tracing, FPS cap, HUD, Retina (Performance.swift).
+    public var performance = PerformanceSettings()
 
-    public init(runtime: String = Runtime.defaultName, graphics: Graphics = .d3dmetal, storage: BottleStorage? = nil) {
+    public init(runtime: String = Runtime.defaultName, graphics: Graphics = .d3dmetal, storage: BottleStorage? = nil,
+                performance: PerformanceSettings = PerformanceSettings()) {
         self.runtime = runtime
         self.graphics = graphics
         self.storage = storage
+        self.performance = performance
+    }
+
+    /// Missing keys take their defaults (cross.json files written before a key existed).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        runtime = try c.decodeIfPresent(String.self, forKey: .runtime) ?? Runtime.defaultName
+        graphics = try c.decodeIfPresent(Graphics.self, forKey: .graphics) ?? .d3dmetal
+        storage = try c.decodeIfPresent(BottleStorage.self, forKey: .storage)
+        performance = try c.decodeIfPresent(PerformanceSettings.self, forKey: .performance) ?? PerformanceSettings()
     }
 }
 

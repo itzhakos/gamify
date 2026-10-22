@@ -12,6 +12,8 @@ struct ProgramsBox: View {
     @State private var adding: PickedExe?
     @State private var addName = ""
     @State private var addArguments = ""
+    /// Clear Shader Cache… asks first.
+    @State private var cacheToClear: ShaderCache.Entry?
 
     private var programs: [Program] { model.programs[bottle.name] ?? [] }
 
@@ -52,6 +54,14 @@ struct ProgramsBox: View {
         .sheet(item: $adding) { picked in
             addSheet(picked.url)
         }
+        .alert("Clear the shader cache of \(cacheToClear?.name ?? "")?",
+               isPresented: Binding(get: { cacheToClear != nil }, set: { if !$0 { cacheToClear = nil } }),
+               presenting: cacheToClear) { entry in
+            Button("Clear", role: .destructive) { model.clearShaderCache(entry) }
+            Button("Cancel", role: .cancel) {}
+        } message: { entry in
+            Text("Deletes the shaders D3DMetal compiled for \(entry.name) (\(entry.sizeText), shared by every bottle). The next start compiles them again: a slower first start and some stutter. Apple recommends this when a game stops starting.")
+        }
     }
 
     private func row(_ program: Program) -> some View {
@@ -67,6 +77,19 @@ struct ProgramsBox: View {
             Button("Launch") { model.launchProgram(program, in: bottle.name) }
                 .controlSize(.small)
                 .help("Runs \(program.exe) with its folder as the working directory")
+            Menu {
+                let cache = model.shaderCache(for: program)
+                Button(cache.map { "Clear Shader Cache (\($0.sizeText))…" } ?? "No Shader Cache Yet") {
+                    cacheToClear = cache
+                }
+                .disabled(cache == nil)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("More: Clear Shader Cache… deletes D3DMetal's compiled shaders for \(ShaderCache.exeName(program.exe))")
             Button {
                 model.removeProgram(program, in: bottle.name)
             } label: {

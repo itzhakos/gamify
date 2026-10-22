@@ -13,7 +13,9 @@ Gamify.app/Contents/MacOS/CrossApp                      the SwiftUI app (app/bui
 Gamify.app/Contents/Resources/steam-probe.exe          Check Steam's test program (src/steam-probe; app layer, not in runtime-version)
 Gamify.app/Contents/SharedSupport/root/
     runtimes/winecx-full/                              our CrossOver-lineage Wine 10.0 (x86_64) + GStreamer, SDL2, MoltenVK
-    runtimes/d3dmetal/                                 Apple D3DMetal 3.0 (+ notices/License.rtf, Acknowledgements.rtf, Read Me.rtf)
+    runtimes/d3dmetal/                                 Apple D3DMetal 3.0 (+ notices/License.rtf, Acknowledgements.rtf, Read Me.rtf;
+                                                       plus nvngx.dll / nvngx.so -> libd3dshared.dylib, Apple's
+                                                       nvngx-on-metalfx under the name games load, docs/app.md "Performance settings")
     src/webhelper-shim/steamwebhelper.exe              our Steam webhelper shim
     scripts/winecx-env.sh                              reference only (Project.looksLikeRoot wants runtimes/ + scripts/)
     THIRD_PARTY_NOTICES.md                             copy of docs/LICENSING.md

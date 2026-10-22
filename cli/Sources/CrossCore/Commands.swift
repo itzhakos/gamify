@@ -33,6 +33,10 @@ extension Runtime {
         }
         try Bottle.validate(name: name)
         try check()
+        if config.graphics == .d3dmetal && config.performance.metalfx {
+            // before wineboot, which fills system32 from WINEDLLPATH (nvngx.dll included)
+            do { try ensureNVNGXNames() } catch { warn("cannot add nvngx.dll/nvngx.so to \(d3dmetalHome.path): \(error)") }
+        }
         let fm = FileManager.default
         let prefix = project.bottles.appendingPathComponent(name)
         for url in [prefix, Bottle.imageURL(name: name, in: project), Bottle.locationURL(name: name, in: project)]
@@ -87,6 +91,7 @@ extension Runtime {
     public func runExe(_ exe: URL, arguments: [String], in bottle: Bottle,
                        base: [String: String] = ProcessInfo.processInfo.environment) throws -> Invocation {
         let exe = exe.standardizedFileURL
+        preparePerformance(bottle, base: base)
         return Invocation(program: wine.path, arguments: [exe.lastPathComponent] + arguments,
                           environment: try environment(for: bottle, base: base),
                           cwd: exe.deletingLastPathComponent().path)
@@ -112,6 +117,7 @@ extension Runtime {
             throw CrossError("Steam not installed in '\(bottle.name)'")
         }
         let env = try environment(for: bottle, base: base)
+        preparePerformance(bottle, base: base)
         try Steam.installShim(in: bottle, project: project)
         if !Steam.processes(in: bottle).isRunning {
             try Steam.resetActiveProcess(in: bottle, runtime: self, environment: env)

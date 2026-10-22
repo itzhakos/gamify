@@ -53,6 +53,15 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
+- **Performance settings** (2026-10-22, branch claude/perf-settings-e1520b, stage 1 of
+  docs/perf-research.md): `performance` in cross.json (sync esync|msync, metalfx default on,
+  avx, raytracing, maxFPS, hud, retina, vendorID) mapped to env vars in Runtime.environment
+  and to registry/files by `Runtime.applyPerformance` (create, change, before every launch).
+  DLSS -> MetalFX plumbing: runtimes/d3dmetal gets nvngx.dll + nvngx.so -> libd3dshared.dylib
+  (also in package-app.sh), system32 nvngx.dll + nvapi64.dll, NGXCore\FullPath,
+  D3DM_ENABLE_METALFX=1 + D3DM_VENDOR_ID=0x10DE (d3d11test then reports vendor 0x10de).
+  `cross bottle show|set`, `cross cache clear`; app: Performance box, Clear Shader Cache….
+  No DLSS game was available to test MetalFX itself. docs/app.md "Performance settings".
 - **Performance research** (2026-10-22, docs/perf-research.md): the D3DMetal 3.0 we ship already
   bridges DLSS to MetalFX, including DLSS Frame Generation -> `MTLFXFrameInterpolator`
   (binary evidence; macOS 26+). Missing on our side: `nvngx-on-metalfx.{dll,so}` renamed to

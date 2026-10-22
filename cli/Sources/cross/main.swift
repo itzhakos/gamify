@@ -7,7 +7,16 @@ cross - bottle manager and launcher for the winecx runtimes
   cross bottle create <name> [--runtime winecx|winecx-full] [--graphics d3dmetal|wined3d]
                            [--storage <GB>|unlimited] [--location <folder>|default]
   cross bottle list
+  cross bottle show <name>                 settings of one bottle (runtime, graphics, disk, performance)
   cross bottle set <name> graphics <d3dmetal|wined3d>
+  cross bottle set <name> sync esync|msync           Windows sync objects: esync (default) or msync
+  cross bottle set <name> metalfx on|off             DLSS through MetalFX (D3DMetal; default on)
+  cross bottle set <name> avx on|off                 advertise AVX/AVX2 to games (ROSETTA_ADVERTISE_AVX)
+  cross bottle set <name> raytracing on|off|default  DirectX ray tracing in D3DMetal (D3DM_SUPPORT_DXR)
+  cross bottle set <name> maxfps <n>|off             frame cap inside D3DMetal (D3DM_MAX_FPS)
+  cross bottle set <name> hud on|off                 Metal performance HUD (MTL_HUD_ENABLED)
+  cross bottle set <name> retina on|off              High Resolution (Retina) mode of the Mac driver
+  cross bottle set <name> vendor <hex>|default       GPU vendor id D3DMetal reports (D3DM_VENDOR_ID)
   cross bottle set <name> storage <GB>|unlimited     (also: --storage <GB>)
   cross bottle set <name> location <folder>|default  move the bottle (e.g. to an external drive)
   cross bottle delete <name>
@@ -33,6 +42,8 @@ cross - bottle manager and launcher for the winecx runtimes
   cross programs <bottle> remove <name>
   cross kill  <bottle>                     wineserver -k
   cross env   <bottle> [--export]          print the environment the bottle runs with
+  cross cache clear <bottle> [<exe name>]  delete D3DMetal's shader cache of one executable (e.g. Game.exe);
+                                           without one, list the cache folders and their sizes
 
 Bottles live in bottles/<name> (or are linked from there); per-bottle settings in bottles/<name>/cross.json.
 Storage: a new bottle gets its own disk of 64 GB by default (less when the disk has
@@ -53,6 +64,15 @@ ejected: `cross bottle eject <name>` unmounts it until the bottle is used again.
 through every connected local drive (3 folder levels deep) or the given folders for bottle
 folders and .sparsebundle images (looked into read-only); `add` lists one in the bottles folder.
 CROSS_BOTTLES=<folder> uses another bottles folder (downloads stay where they are).
+Performance settings (cross.json "performance") apply to programs started afterwards; change
+sync and retina only while nothing runs in the bottle. metalfx (D3DMetal bottles) sets
+D3DM_ENABLE_METALFX=1 and D3DM_VENDOR_ID=0x10DE, puts nvngx.dll + nvapi64.dll in system32 and
+sets HKLM\\Software\\NVIDIA Corporation\\Global\\NGXCore\\FullPath; games that offer DLSS then get
+MetalFX upscaling (and frame generation on macOS 26+ where the game's DLSS-G runs). Files and
+registry values are checked before every launch. The shader cache lives in
+$(getconf DARWIN_USER_CACHE_DIR)d3dm/<exe name>/, one folder per executable name, shared by
+all bottles; clearing it makes the next start rebuild shaders (Apple's advice for a game that
+stopped booting).
 Stores: steam, epic (Epic Games Store), gog (GOG Galaxy), battlenet (Battle.net). Installers
 are cached in downloads/<store>/; install and installer output goes to
 ~/Library/Logs/Gamify/<bottle>/. Programs: shortcuts are read from the Start Menu and Desktop
@@ -64,9 +84,10 @@ is launched through Steam (steam://rungameid/<appid>) unless it is given argumen
 Runtimes: winecx (default) and winecx-full (same Wine + GStreamer, SDL2, MoltenVK),
 both in runtimes/; a bottle keeps the runtime it was created with.
 The project root is found by walking up from the binary (or set CROSS_ROOT).
-Honoured from the caller's environment: WINEDEBUG (default -all), WINEESYNC (1),
-WINEMSYNC (passthrough), MTL_HUD_ENABLED (0), WINECX_GRAPHICS (overrides cross.json),
-D3DMETAL_HOME (runtimes/d3dmetal).
+Honoured from the caller's environment: WINEDEBUG (default -all), WINECX_GRAPHICS (overrides
+cross.json), D3DMETAL_HOME (runtimes/d3dmetal), and any variable a performance setting decides
+(WINEESYNC/WINEMSYNC as a pair, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX, D3DM_*): a non-empty
+value in the caller's environment wins over the bottle's setting.
 """
 
 func fail(_ message: String) -> Never {
@@ -101,6 +122,41 @@ func storageText(_ bottle: Bottle) -> String {
     guard bottle.isImageBacked else { return "folder (no limit)" }
     guard let usage = bottle.storageUsage else { return "image, not mounted" }
     return "image \(formatGB(usage.used)) used of \(formatGB(usage.total))"
+}
+
+/// on/off values of `bottle set`.
+func parseSwitch(_ value: String, _ key: String) -> Bool {
+    switch value.lowercased() {
+    case "on", "yes", "true", "1": return true
+    case "off", "no", "false", "0": return false
+    default: fail("\(key) must be on or off, not '\(value)'")
+    }
+}
+
+func onOff(_ b: Bool) -> String { b ? "on" : "off" }
+
+/// `cross bottle show`: each performance setting with what it does in this bottle.
+func performanceLines(_ config: BottleConfig) -> [String] {
+    let p = config.performance
+    let d3dmetal = config.graphics == .d3dmetal
+    let env = p.environment(graphics: config.graphics)
+    func vars(_ keys: [String]) -> String {
+        let set = keys.compactMap { k in env[k].flatMap { $0 }.map { "\(k)=\($0)" } }
+        return set.isEmpty ? "" : set.joined(separator: " ")
+    }
+    let onlyD3DMetal = "(D3DMetal bottles only)"
+    var lines: [(String, String, String)] = [
+        ("sync", p.sync.rawValue, vars(["WINEESYNC", "WINEMSYNC"])),
+        ("metalfx", onOff(p.metalfx), d3dmetal ? (p.metalfx ? vars(["D3DM_ENABLE_METALFX"]) + ", nvngx.dll + nvapi64.dll in system32, NGXCore\\FullPath" : "") : onlyD3DMetal),
+        ("avx", onOff(p.avx), vars(["ROSETTA_ADVERTISE_AVX"])),
+        ("raytracing", p.raytracing.map(onOff) ?? "default", d3dmetal ? vars(["D3DM_SUPPORT_DXR"]) : onlyD3DMetal),
+        ("maxfps", p.maxFPS.map(String.init) ?? "off", d3dmetal ? vars(["D3DM_MAX_FPS"]) : onlyD3DMetal),
+        ("hud", onOff(p.hud), vars(["MTL_HUD_ENABLED"])),
+        ("retina", onOff(p.retina), "RetinaMode=\(p.retina ? "Y" : "N")"),
+    ]
+    lines.append(("vendor", p.vendorID.map(PerformanceSettings.hex) ?? "default",
+                  d3dmetal ? (vars(["D3DM_VENDOR_ID"]).isEmpty ? "D3DMetal's own (0x1002)" : vars(["D3DM_VENDOR_ID"])) : onlyD3DMetal))
+    return lines.map { "  " + $0.0.padding(toLength: 12, withPad: " ", startingAt: 0) + $0.1.padding(toLength: 9, withPad: " ", startingAt: 0) + $0.2 }
 }
 
 func main() throws {
@@ -155,6 +211,7 @@ func main() throws {
             let bottle = try runtime.createBottle(name: name, config: config, storageGB: sizeGB, location: home)
             let status = try runWaiting(try runtime.wineboot(for: bottle))
             guard status == 0 else { fail("wineboot --init failed with status \(status)") }
+            for line in try runtime.applyPerformance(to: bottle) { print(line) }
             let storage = sizeGB.map { "\($0) GB disk image" } ?? "folder"
             print("bottle '\(name)' (\(config.runtime), \(config.graphics.rawValue), \(storage)) ready at \(bottle.location?.path ?? bottle.prefix.path)")
 
@@ -165,6 +222,19 @@ func main() throws {
                 let location = b.location.map { "  (in \($0.deletingLastPathComponent().path))" } ?? ""
                 print(pad(b.name, 12) + pad(b.config.runtime, 12) + pad(graphics, 9) + storageText(b) + location)
             }
+
+        case "show":
+            let name = requireArg(args, 1, "bottle name")
+            guard let b = try Bottle.list(in: project).first(where: { $0.name == name }) else {
+                fail("no bottle '\(name)' in \(project.bottles.path)")
+            }
+            print("\(b.name)")
+            print("  runtime     \(b.config.runtime)")
+            print("  graphics    \(b.config.graphics.rawValue)")
+            print("  disk        \(storageText(b))")
+            print("  location    \(b.location?.path ?? b.prefix.path)")
+            print("performance (applies to programs started afterwards):")
+            performanceLines(b.config).forEach { print($0) }
 
         case "set":
             let name = requireArg(args, 1, "bottle name")
@@ -196,14 +266,46 @@ func main() throws {
                 }
                 return
             }
-            switch key {
+            switch key.lowercased() {
             case "graphics":
                 guard let g = Graphics(rawValue: value) else { fail("unknown graphics '\(value)' (d3dmetal|wined3d)") }
                 bottle.config.graphics = g
-            default: fail("unknown setting '\(key)' (graphics, storage, location)")
+            case "sync":
+                guard let mode = SyncMode(rawValue: value.lowercased()) else { fail("sync must be esync or msync, not '\(value)'") }
+                bottle.config.performance.sync = mode
+            case "metalfx", "dlss":
+                bottle.config.performance.metalfx = parseSwitch(value, key)
+            case "avx":
+                bottle.config.performance.avx = parseSwitch(value, key)
+            case "raytracing", "dxr":
+                bottle.config.performance.raytracing = value.lowercased() == "default" ? nil : parseSwitch(value, key)
+            case "maxfps", "fps":
+                if ["off", "none", "default", "0"].contains(value.lowercased()) {
+                    bottle.config.performance.maxFPS = nil
+                } else {
+                    guard let n = Int(value), n > 0 else { fail("maxfps must be a positive number or off, not '\(value)'") }
+                    bottle.config.performance.maxFPS = n
+                }
+            case "hud":
+                bottle.config.performance.hud = parseSwitch(value, key)
+            case "retina":
+                bottle.config.performance.retina = parseSwitch(value, key)
+            case "vendor", "vendorid":
+                if value.lowercased() == "default" {
+                    bottle.config.performance.vendorID = nil
+                } else {
+                    guard let id = PerformanceSettings.parseVendorID(value) else { fail("vendor must be a hex id like 0x10DE or default, not '\(value)'") }
+                    bottle.config.performance.vendorID = id
+                }
+            default: fail("unknown setting '\(key)' (graphics, storage, location, sync, metalfx, avx, raytracing, maxfps, hud, retina, vendor)")
             }
             try bottle.saveConfig()
             print("\(name): \(key) = \(value)")
+            // files and registry values (nvngx.dll, NGXCore, RetinaMode); env vars need nothing
+            if ["graphics", "metalfx", "dlss", "retina"].contains(key.lowercased()) {
+                let runtime = try Runtime.forBottle(bottle, project: project)
+                for line in try runtime.applyPerformance(to: bottle, force: true) { print("\(name): \(line)") }
+            }
 
         case "delete":
             let name = requireArg(args, 1, "bottle name")
@@ -414,6 +516,29 @@ func main() throws {
         for line in Runtime.environmentLines(try runtime.environment(for: bottle), export: export) {
             print(line)
         }
+
+    case "cache":
+        let sub = requireArg(args, 0, "cache subcommand")
+        guard sub == "clear" else { fail("unknown cache subcommand '\(sub)'\n\n" + usage) }
+        let bottle = try Bottle.load(name: requireArg(args, 1, "bottle name"), in: project)
+        if args.count > 2 {
+            let exe = ShaderCache.exeName(args[2])
+            guard let entry = ShaderCache.entry(forExe: exe) else {
+                fail("no shader cache for \(exe) in \(ShaderCache.root.path)")
+            }
+            try ShaderCache.clear(exe: exe)
+            print("cleared the shader cache of \(entry.name) (\(entry.sizeText)); the next start rebuilds it")
+            return
+        }
+        let entries = ShaderCache.list()
+        let programExes = Set(Programs.list(in: bottle).map { ShaderCache.exeName($0.exe).lowercased() })
+        print("D3DMetal shader cache: \(ShaderCache.root.path) (shared by all bottles)")
+        if entries.isEmpty { print("  (empty)") }
+        for e in entries {
+            let mark = programExes.contains(e.name.lowercased()) ? "  (a program in '\(bottle.name)')" : ""
+            print("  " + e.name.padding(toLength: 40, withPad: " ", startingAt: 0) + e.sizeText + mark)
+        }
+        print("clear one with: cross cache clear \(bottle.name) <exe name>")
 
     default:
         fail("unknown command '\(command)'\n\n" + usage)

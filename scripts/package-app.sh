@@ -44,6 +44,13 @@ mkdir -p "$R/runtimes" "$R/src/webhelper-shim" "$R/scripts"
 # -R keeps symlinks (the D3DMetal .so files and wineloader must stay symlinks)
 cp -R "$ROOT/runtimes/$RUNTIME" "$R/runtimes/$RUNTIME"
 cp -R "$ROOT/runtimes/d3dmetal" "$R/runtimes/d3dmetal"
+# DLSS through MetalFX: games load nvngx.dll, Apple ships nvngx-on-metalfx.{dll,so}. Ship
+# both names (as CrossCore's Runtime.ensureNVNGXNames does); the .so stays a symlink.
+D3DM="$R/runtimes/d3dmetal"
+if [ -f "$D3DM/x86_64-windows/nvngx-on-metalfx.dll" ]; then
+    [ -f "$D3DM/x86_64-windows/nvngx.dll" ] || cp "$D3DM/x86_64-windows/nvngx-on-metalfx.dll" "$D3DM/x86_64-windows/nvngx.dll"
+    ln -sfn libd3dshared.dylib "$D3DM/x86_64-unix/nvngx.so"
+fi
 cp "$ROOT/src/webhelper-shim/steamwebhelper.exe" "$R/src/webhelper-shim/"
 cp "$ROOT/src/steam-probe/steam-probe.exe" "$APP/Contents/Resources/"
 cp "$ROOT/scripts/winecx-env.sh" "$R/scripts/"        # Project.looksLikeRoot wants runtimes/ + scripts/
