@@ -1,11 +1,14 @@
 /* Minimal DXGI + D3D11 smoke test: enumerate adapters, create a device and a
  * swap chain on a window, clear it for N frames. Prints the adapter description
  * so we can tell wined3d, D3DMetal 2.1 and D3DMetal 3.0 apart.
+ * `d3d11test.exe <frames> fullscreen`: borderless screen-sized window + DXGI
+ * SetFullscreenState(TRUE), e.g. to see whether macOS Game Mode turns on.
  * Build: make -C src/d3dtest  (x86_64-w64-mingw32-gcc) */
 #define COBJMACROS
 #define INITGUID
 #include <windows.h>
 #include <stdio.h>
+#include <string.h>
 #include <d3d11.h>
 #include <dxgi.h>
 
@@ -18,11 +21,15 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 int main(int argc, char **argv)
 {
     int frames = argc > 1 ? atoi(argv[1]) : 120;
+    BOOL fullscreen = argc > 2 && !strcmp(argv[2], "fullscreen");
     WNDCLASSW wc = { 0 };
     wc.lpfnWndProc = wndproc; wc.hInstance = GetModuleHandleW(NULL); wc.lpszClassName = L"d3d11test";
     RegisterClassW(&wc);
-    HWND hwnd = CreateWindowW(L"d3d11test", L"d3d11test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-                              100, 100, 640, 480, NULL, NULL, wc.hInstance, NULL);
+    HWND hwnd = fullscreen
+        ? CreateWindowW(L"d3d11test", L"d3d11test", WS_POPUP | WS_VISIBLE, 0, 0,
+                        GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN), NULL, NULL, wc.hInstance, NULL)
+        : CreateWindowW(L"d3d11test", L"d3d11test", WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+                        100, 100, 640, 480, NULL, NULL, wc.hInstance, NULL);
 
     IDXGIFactory1 *factory = NULL;
     HRESULT hr = CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&factory);
@@ -48,6 +55,12 @@ int main(int argc, char **argv)
     printf("D3D11CreateDeviceAndSwapChain: 0x%08lx feature level 0x%x\n", hr, fl); fflush(stdout);
     if (FAILED(hr)) return 2;
 
+    if (fullscreen) {
+        hr = IDXGISwapChain_SetFullscreenState(sc, TRUE, NULL);
+        printf("SetFullscreenState(TRUE): 0x%08lx\n", hr);
+        hr = IDXGISwapChain_ResizeBuffers(sc, 0, 0, 0, DXGI_FORMAT_UNKNOWN, 0);
+        printf("ResizeBuffers: 0x%08lx\n", hr); fflush(stdout);
+    }
     ID3D11Texture2D *bb; ID3D11RenderTargetView *rtv;
     IDXGISwapChain_GetBuffer(sc, 0, &IID_ID3D11Texture2D, (void **)&bb);
     ID3D11Device_CreateRenderTargetView(dev, (ID3D11Resource *)bb, NULL, &rtv);
@@ -63,5 +76,6 @@ int main(int argc, char **argv)
     DWORD dt = GetTickCount() - t0;
     printf("presented %d frames in %lu ms (%.1f fps)\n", frames, dt, dt ? 1000.0 * frames / dt : 0.0);
     fflush(stdout);
+    if (fullscreen) IDXGISwapChain_SetFullscreenState(sc, FALSE, NULL);
     return 0;
 }

@@ -1,0 +1,145 @@
+win32u-d3dkmt-hwsched.patch - Gamify patch over CrossOver 25.1.0 Wine (dlls/win32u, include), LGPL-2.1-or-later.
+Port of CW HACK 24905 from CrossOver 26.1 (dlls/win32u/d3dkmt.c): NtGdiDdDDIQueryAdapterInfo (gdi32
+D3DKMTQueryAdapterInfo) was a STATUS_NOT_IMPLEMENTED stub in Wine 10.0. Now it answers
+KMTQAITYPE_CHECKDRIVERUPDATESTATUS (FALSE), KMTQAITYPE_DRIVERVERSION (WDDM 1.3) and
+KMTQAITYPE_WDDM_2_7_CAPS with HwSchSupported/HwSchEnabled/HwSchEnabledByDefault = 1 when the D3DMetal
+backend is active (WINECX_GRAPHICS=d3dmetal, Gamify; or CX_ACTIVE_GRAPHICS_BACKEND=d3dmetal, CrossOver).
+DLSS Frame Generation (D3DMetal's MetalFX bridge) requires hardware-accelerated GPU scheduling.
+WINE_DISABLE_HARDWARE_SCHEDULING=1 reports all three bits as 0 (Proton's opt-out).
+Adds D3DKMT_DRIVERVERSION (ddk/d3dkmthk.h) and D3DKMT_WDDM_2_7_CAPS (d3dkmdt.h) from Wine 11's headers.
+Details: docs/codeweavers-patches.md "Ported from CrossOver 26.1".
+
+--- a/dlls/win32u/d3dkmt.c	2026-10-22 21:08:56
++++ b/dlls/win32u/d3dkmt.c	2026-10-22 21:09:25
+@@ -29,6 +29,7 @@
+ #include "ntgdi_private.h"
+ #include "win32u_private.h"
+ #include "ntuser_private.h"
++#include "d3dkmdt.h"
+ 
+ WINE_DEFAULT_DEBUG_CHANNEL(vulkan);
+ 
+@@ -333,10 +334,67 @@
+  */
+ NTSTATUS WINAPI NtGdiDdDDIQueryAdapterInfo( D3DKMT_QUERYADAPTERINFO *desc )
+ {
+-    if (!desc) return STATUS_INVALID_PARAMETER;
++    TRACE( "(%p).\n", desc );
+ 
+-    FIXME( "desc %p, type %d stub\n", desc, desc->Type );
+-    return STATUS_NOT_IMPLEMENTED;
++    if (!desc || !desc->hAdapter || !desc->pPrivateDriverData)
++        return STATUS_INVALID_PARAMETER;
++
++    switch (desc->Type)
++    {
++    case KMTQAITYPE_CHECKDRIVERUPDATESTATUS:
++    {
++        BOOL *value = desc->pPrivateDriverData;
++
++        if (desc->PrivateDriverDataSize < sizeof(*value))
++            return STATUS_INVALID_PARAMETER;
++
++        *value = FALSE;
++        return STATUS_SUCCESS;
++    }
++    case KMTQAITYPE_DRIVERVERSION:
++    {
++        D3DKMT_DRIVERVERSION *value = desc->pPrivateDriverData;
++
++        if (desc->PrivateDriverDataSize < sizeof(*value))
++            return STATUS_INVALID_PARAMETER;
++
++        *value = KMT_DRIVERVERSION_WDDM_1_3;
++        return STATUS_SUCCESS;
++    }
++    /* CW HACK 24905 (ported from CrossOver 26.1 by Gamify): report hardware-accelerated GPU
++     * scheduling (HAGS) for D3DMetal, which DLSS Frame Generation (MetalFX) requires.
++     * CrossOver keys on CX_ACTIVE_GRAPHICS_BACKEND, Gamify's runtime sets WINECX_GRAPHICS;
++     * WINE_DISABLE_HARDWARE_SCHEDULING=1 turns it off like in Proton. */
++    case KMTQAITYPE_WDDM_2_7_CAPS:
++    {
++        D3DKMT_WDDM_2_7_CAPS *caps = desc->pPrivateDriverData;
++        const char *backend = getenv( "WINECX_GRAPHICS" );
++        const char *cx_backend = getenv( "CX_ACTIVE_GRAPHICS_BACKEND" );
++        const char *disable = getenv( "WINE_DISABLE_HARDWARE_SCHEDULING" );
++
++        if (desc->PrivateDriverDataSize < sizeof(*caps))
++            return STATUS_INVALID_PARAMETER;
++
++        if ((backend && !strcmp( backend, "d3dmetal" )) ||
++            (cx_backend && !strcmp( cx_backend, "d3dmetal" )))
++        {
++            memset( caps, 0, sizeof(*caps) );
++            if (!disable || !*disable || *disable == '0')
++            {
++                caps->HwSchEnabled = 1;
++                caps->HwSchSupported = 1;
++                caps->HwSchEnabledByDefault = 1;
++            }
++            return STATUS_SUCCESS;
++        }
++        /* fallthrough */
++    }
++    default:
++    {
++        FIXME( "type %d not handled.\n", desc->Type );
++        return STATUS_NOT_IMPLEMENTED;
++    }
++    }
+ }
+ 
+ /******************************************************************************
+--- a/include/d3dkmdt.h	2026-10-22 21:08:56
++++ b/include/d3dkmdt.h	2026-10-22 21:09:07
+@@ -56,4 +56,20 @@
+     D3DKMDT_VSS_OTHER         = 255
+ } D3DKMDT_VIDEO_SIGNAL_STANDARD;
+ 
++typedef struct _D3DKMT_WDDM_2_7_CAPS
++{
++    union
++    {
++        struct
++        {
++            UINT HwSchSupported               :  1;
++            UINT HwSchEnabled                 :  1;
++            UINT HwSchEnabledByDefault        :  1;
++            UINT IndependentVidPnVSyncControl :  1;
++            UINT Reserved                     : 28;
++        };
++        UINT Value;
++    };
++} D3DKMT_WDDM_2_7_CAPS;
++
+ #endif /* __WINE_D3DKMDT_H */
+--- a/include/ddk/d3dkmthk.h	2026-10-22 21:08:56
++++ b/include/ddk/d3dkmthk.h	2026-10-22 21:09:07
+@@ -175,6 +175,27 @@
+     HANDLE hBitmap;
+ } D3DKMT_DESTROYDCFROMMEMORY;
+ 
++typedef enum _QAI_DRIVERVERSION
++{
++    KMT_DRIVERVERSION_WDDM_1_0 = 1000,
++    KMT_DRIVERVERSION_WDDM_1_1_PRERELEASE = 1102,
++    KMT_DRIVERVERSION_WDDM_1_1 = 1105,
++    KMT_DRIVERVERSION_WDDM_1_2 = 1200,
++    KMT_DRIVERVERSION_WDDM_1_3 = 1300,
++    KMT_DRIVERVERSION_WDDM_2_0 = 2000,
++    KMT_DRIVERVERSION_WDDM_2_1 = 2100,
++    KMT_DRIVERVERSION_WDDM_2_2 = 2200,
++    KMT_DRIVERVERSION_WDDM_2_3 = 2300,
++    KMT_DRIVERVERSION_WDDM_2_4 = 2400,
++    KMT_DRIVERVERSION_WDDM_2_5 = 2500,
++    KMT_DRIVERVERSION_WDDM_2_6 = 2600,
++    KMT_DRIVERVERSION_WDDM_2_7 = 2700,
++    KMT_DRIVERVERSION_WDDM_2_8 = 2800,
++    KMT_DRIVERVERSION_WDDM_2_9 = 2900,
++    KMT_DRIVERVERSION_WDDM_3_0 = 3000,
++    KMT_DRIVERVERSION_WDDM_3_1 = 3100
++} D3DKMT_DRIVERVERSION;
++
+ typedef enum _KMTQUERYADAPTERINFOTYPE
+ {
+     KMTQAITYPE_UMDRIVERPRIVATE,

@@ -126,7 +126,8 @@ realigns the stack itself where SSE needs 16 bytes.
 
 The scripts also apply `src/patches/*.patch` to the CrossOver tree before configure (idempotent:
 a patch that already reverses cleanly is skipped), so our own fixes, currently
-`winemac-qt5-opengl.patch` (docs/worms-opengl.md), are part of every build.
+`winemac-qt5-opengl.patch` (docs/worms-opengl.md) and since 2026-10-22 the three CrossOver 26.1
+ports (section "Ported from CrossOver 26.1" below), are part of every build.
 `src/patches/crossover-25.1.0-over-wine-10.0.diff` is reference only and never applied.
 `WINECX_PREFIX` / `WINECX_BUILD` build a second copy next to the live runtime; the prefix must
 already hold the deps (clone the live runtime with `cp -Rc`; the deps' install names then
@@ -180,6 +181,107 @@ hand-installed `syswow64/dsound.dll`, its `.wine-x87.bak` and `DllOverrides "dso
 `wineboot --update` reinstalled the runtime's DLL (byte-identical to
 `lib/wine/i386-windows/dsound.dll`, 61 x87 ops). Shipped in Gamify 0.3. The user confirmed
 Portal 2 audio clean and Worms working; `runtimes/winecx-x87` / `winecx-full-x87` deleted.
+
+## Ported from CrossOver 26.1: rebuild and swap (both runtimes, 2026-10-22)
+Three new `src/patches` (HAGS for D3DMetal, XGETBV emulation, Game Mode plist keys; details in
+docs/codeweavers-patches.md "Ported from CrossOver 26.1"). Built side by side, the live
+runtimes untouched:
+
+```
+cp -Rc runtimes/winecx runtimes/winecx-next              # APFS clone: deps + old Wine
+cp -Rc runtimes/winecx-full runtimes/winecx-full-next
+WINECX_PREFIX=$PWD/runtimes/winecx-next WINECX_BUILD=$PWD/build/x86_64-next \
+  sh -c 'scripts/build-winecx-deps.sh && scripts/build-winecx.sh'
+WINECX_PREFIX=$PWD/runtimes/winecx-full-next WINECX_BUILD=$PWD/build/x86_64-full-next \
+  sh -c 'scripts/build-winecx-full-deps.sh && scripts/build-winecx-full.sh'
+```
+
+- Both deps scripts now honour `WINECX_PREFIX` / `WINECX_BUILD` like the Wine scripts. Every
+  dep is skipped when its dylib is already in the prefix, so on the clone they did nothing
+  (the deps keep their install names under `runtimes/winecx*/lib`, i.e. the final location
+  after the swap). Everything else (configure flags, i386 SSE flags, post-install steps) is
+  unchanged.
+- The patches are applied **in place** to `upstream/crossover-sources-25.1.0/sources/wine`
+  (as every `src/patches/*.patch`), so that tree now carries them. To build without them:
+  `patch -p1 -R -d upstream/crossover-sources-25.1.0/sources/wine < src/patches/<name>.patch`.
+- Times (M4 Max, another session building in parallel, load ~100): winecx configure 28 s,
+  make 4 min 28 s, install 2 min 38 s; winecx-full configure 38 s, make 3 min 56 s, install
+  1 min 54 s. Sizes: 1.5 GB per runtime, 3.1 GB per build dir.
+- Checks on the installed trees: `otool -s __TEXT __info_plist bin/wine` contains the three
+  Game Mode keys (live runtime: none); `ntdll.so` has `emulate_xgetbv`, `win32u.so` reads
+  `WINECX_GRAPHICS`, `CX_ACTIVE_GRAPHICS_BACKEND`, `WINE_DISABLE_HARDWARE_SCHEDULING`;
+  `grep -rl winecx-next` / `winecx-full-next`: nothing, so the trees can be renamed. (The
+  build ran from this branch's worktree, whose `upstream` is a symlink to the main checkout's,
+  so 327 widl-generated headers under `include/wine` name the worktree in their "generated
+  from" comment; the live runtime has the same 327 with the main checkout's path. Comments
+  only.)
+
+### Verification (scratch bottles `old` on the live winecx, `new` on winecx-next, `newfull` on winecx-full-next; D3DMetal 3.0)
+Bottles created with `cross bottle create --storage unlimited` under `CROSS_BOTTLES=<scratch>`;
+the new runtimes reached through `CROSS_ROOT=<scratch root>` whose `runtimes/winecx` and
+`runtimes/winecx-full` are symlinks to the `-next` trees.
+
+`src/hagstest/hagstest.exe` (gdi32 `D3DKMTEnumAdapters2` -> `D3DKMTQueryAdapterInfo`):
+
+| Runtime, environment | DRIVERVERSION | CHECKDRIVERUPDATESTATUS | WDDM_2_7_CAPS |
+|---|---|---|---|
+| winecx (live), d3dmetal or wined3d | `0xc0000002` | `0xc0000002` | `0xc0000002` (STATUS_NOT_IMPLEMENTED) |
+| winecx-next, `WINECX_GRAPHICS=d3dmetal` (default) | 1300 | 0 | HwSchSupported=1 HwSchEnabled=1 HwSchEnabledByDefault=1 |
+| winecx-next, + `WINE_DISABLE_HARDWARE_SCHEDULING=1` | 1300 | 0 | status 0, all three 0 |
+| winecx-next, `WINECX_GRAPHICS=wined3d` | 1300 | 0 | `0xc0000002` |
+| winecx-next, wined3d + `CX_ACTIVE_GRAPHICS_BACKEND=d3dmetal` | 1300 | 0 | 1 / 1 / 1 |
+| winecx-full-next, d3dmetal (and with the opt-out) | 1300 | 0 | 1 / 1 / 1 (0 / 0 / 0) |
+
+Adapter: one, handle 0x1, LUID `00000000:000003f4`, on both runtimes (also on winecx, which has
+no Vulkan).
+
+`src/avxtest/avxtest.exe` (identical on winecx, winecx-next and winecx-full-next):
+
+| Environment | cpuid 1 ecx | cpuid 7 ebx | xgetbv(0) | 256-bit `vaddps` |
+|---|---|---|---|---|
+| default | `0298220f` (no XSAVE/OSXSAVE/AVX) | `0` | not executed (no OSXSAVE); with `force`: `0x7`, no fault | — |
+| `ROSETTA_ADVERTISE_AVX=1` | `7ed8320f` (XSAVE, OSXSAVE, AVX) | `0x128` (AVX2, no AVX-512) | `0x7` | 16 (works) |
+
+So on macOS 27 Rosetta executes `XGETBV` itself, also on the old runtime; nothing crashes and
+the emulation is never entered (`WINEDEBUG=+seh` shows no "emulated an XGETBV instruction").
+A native x86_64 macOS probe gives the same values. The patch only matters on older macOS.
+
+Other checks on winecx-next and winecx-full-next: `cross cmd <bottle> /c ver` = Microsoft
+Windows 10.0.19043; notepad opens ("Untitled - Notepad", 1360x1024, on screen);
+`src/d3dtest/d3d11test.exe`: AMD Compatibility Mode, FL 11_0, 120 frames (57.5 fps on
+winecx-next with the parallel build running, 118.5 fps on winecx-full-next);
+`d3d12test.exe`: D3D12CreateDevice ok, FL 12_2, SM 6.6, 120 frames (68.1 / 119.3 fps).
+winecx-full-next also initialises MoltenVK as before.
+
+**Game Mode: not reachable this way.** `d3d11test.exe 720 fullscreen` (new option:
+borderless screen-sized window + `SetFullscreenState(TRUE)`, both calls `S_OK`) puts a
+3440x1440 window on screen (layer 3) at 60 fps. But LaunchServices registers every Wine
+process, old and new runtime alike, as name `"wine"`, bundleID NULL (`lsappinfo info`), type
+`BackgroundOnly` until winemac turns it into `Foreground`. If the embedded `__info_plist` were
+read, the name would be its `CFBundleName` ("CrossOver-Hosted Application") and `LSUIElement`
+would make it a UIElement. So macOS ignores the loader's embedded plist, the Game Mode keys
+included. gamepolicyd logs `Ignoring <private>` for the process (`log stream --predicate
+'process == "gamepolicyd"'`). The process could not be made frontmost from a script
+(`NSRunningApplication.activate` returned true, `isActive` stayed false) and no screenshot of
+the menu bar was taken, so this is evidence, not a check of the Game Mode indicator. Making
+it work probably needs the loader inside a real `.app` bundle (`Contents/Info.plist` with
+these keys + `Contents/MacOS/wine`); not tried. The patch is harmless and kept for that.
+
+### Swap (for the main session; runtimes must be idle)
+1. Stop everything that uses the runtimes: `pgrep -fl 'runtimes/winecx'` must be empty (quit
+   Steam etc. in the bottles, `cross kill <bottle>`).
+2. Carry over anything added to the live runtimes after the clone (21:10 on 2026-10-22;
+   normally nothing): `rsync -a --ignore-existing runtimes/winecx/ runtimes/winecx-next/` and
+   `rsync -a --ignore-existing runtimes/winecx-full/ runtimes/winecx-full-next/`.
+3. `mv runtimes/winecx runtimes/winecx-prev && mv runtimes/winecx-next runtimes/winecx`, then
+   `mv runtimes/winecx-full runtimes/winecx-full-prev && mv runtimes/winecx-full-next runtimes/winecx-full`.
+4. Check: `cross cmd <a winecx bottle> /c ver`, `cross run <bottle> src/hagstest/hagstest.exe`
+   (expect `HwSchEnabled=1`, exit 0), the same in a winecx-full bottle. Existing bottles need no
+   `wineboot --update`: only unix-side files (`ntdll.so`, `win32u.so`) and `bin/wine` changed.
+5. Rollback = the two `mv`s in reverse. After the user has run games on it: delete
+   `runtimes/winecx-prev`, `runtimes/winecx-full-prev`, and `build/x86_64-next`,
+   `build/x86_64-full-next` (3.1 GB each; their Makefiles point at the `-next` prefixes and this
+   worktree's source path, so they are not reusable for incremental builds after the swap).
 
 ## Sizes
 - `runtimes/winecx-full`: 1.5 GB (winecx: 1.4 GB). 114 dylibs in `lib/`, 31 unix `.so`
@@ -246,6 +348,9 @@ gstreamer core 10 s, base 12 s, good 6 s, bad 11 s, ugly 4 s, SDL2 22 s, MoltenV
     `renderer=gl` there by default if DX10/11 games run worse.
 
 ## Test programs added
+- `src/hagstest/` (`make -C src/hagstest`): HAGS / `D3DKMTQueryAdapterInfo` check (2026-10-22).
+- `src/avxtest/` (`make -C src/avxtest`): cpuid AVX bits, `xgetbv`, one AVX op (2026-10-22).
+- `src/d3dtest/d3d11test.exe <frames> fullscreen`: full-screen variant (2026-10-22).
 - `src/mftest/` (`make -C src/mftest`): `mftest.exe <file>` (Media Foundation),
   `dshowtest.exe <file> [timeout_ms]` (DirectShow).
 - `src/vktest/` (`make -C src/vktest`, uses the Vulkan headers MoltenVK's fetchDependencies

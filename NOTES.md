@@ -2,6 +2,15 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **2026-10-22 CrossOver 26.1 ports** (branch claude/wine-hags-avx-5bfccc): `src/patches/`
+  `win32u-d3dkmt-hwsched.patch` (CW HACK 24905: `D3DKMTQueryAdapterInfo(KMTQAITYPE_WDDM_2_7_CAPS)`
+  reports HAGS when `WINECX_GRAPHICS=d3dmetal`, opt-out `WINE_DISABLE_HARDWARE_SCHEDULING=1`;
+  needed for DLSS Frame Generation), `ntdll-emulate-xgetbv.patch` (CW HACK 23427; on macOS 27
+  Rosetta runs XGETBV itself, so `ROSETTA_ADVERTISE_AVX=1` already works on the old runtime),
+  `loader-plist-gamemode.patch` (Game Mode keys in wineloader's embedded plist; LaunchServices
+  ignores that plist, so no Game Mode yet). Built into `runtimes/winecx-next` /
+  `winecx-full-next`, verified (`src/hagstest`: NOT_IMPLEMENTED -> 1/1/1; `src/avxtest`; d3d11/12,
+  ver, notepad), **not swapped yet**: docs/runtime-full.md "Ported from CrossOver 26.1".
 - **Runtime**: `runtimes/winecx` (CrossOver 25.1 Wine 10.0, x86_64 under Rosetta, built by
   `scripts/build-winecx-deps.sh` + `scripts/build-winecx.sh`) and `runtimes/winecx-full`
   (same + GStreamer, SDL2, MoltenVK; `scripts/build-winecx-full-deps.sh` + `scripts/build-winecx-full.sh`).
