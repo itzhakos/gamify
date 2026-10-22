@@ -284,9 +284,10 @@ newer `winemac.drv` hook table first.
 
 ## 8. Our own code
 
-- Today there is **no license file** in the project (no `LICENSE` at the root, in `cli/` or in
-  `src/`).
-- **Proposal: MIT** for everything we write that is not part of Wine: `cli/`, `scripts/`,
+- **Decided 2026-10-22:** `LICENSE` at the root is MIT (copyright Yuval Itzhaki), added when
+  the repository `itzhakos/gamify` was made public. The README's License section states the
+  `src/patches/` exception below.
+- **MIT** for everything we write that is not part of Wine: `cli/`, `scripts/`,
   `src/webhelper-shim/`, `src/d3dtest/`, and the future SwiftUI app. Reasons: it keeps a paid
   app possible (MIT code can be relicensed into a closed product by its owner), it is
   compatible with distributing alongside LGPL/GPL/Apache components, the shim's model project

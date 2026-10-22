@@ -13,3 +13,10 @@ bottle, install Steam with one click, launch games.
   release`, the app with `app/build.sh`, the installer with `scripts/package-app.sh`.
 
 Free and non-commercial while it bundles Apple's D3DMetal (see docs/LICENSING.md).
+
+## License
+
+Our own code (`app/`, `cli/`, `scripts/`, `src/` except `src/patches/`) is MIT, see `LICENSE`.
+The patches in `src/patches/` modify Wine and are LGPL-2.1-or-later, like Wine itself.
+Wine, its libraries and Apple's D3DMetal keep their own licenses (docs/LICENSING.md); none of
+them are in this repository.
