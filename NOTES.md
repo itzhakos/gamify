@@ -62,6 +62,15 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
+- **Split Fiction test** (2026-10-22/23, user's Steam bottle, docs/perf-research.md "Real-game
+  test"): the game has **no DLSS** (FSR 3.1 only), so DLSS->MetalFX is still untested on a real
+  game (candidates owned: Cyberpunk 2077, Portal with RTX; no disk space). Measured on the 3D
+  "Play Local" menu (capped at 60 fps by the game; GPU time is the comparable number): D3DMetal
+  DX11 11.9 ms, DXMT DX11 12.7 ms (first real game on DXMT), D3DMetal DX12 13.3 ms; title screen
+  uncapped 174 fps. FSR 3 frame generation produced alternating 12.3 ms / 0.96 ms frames in one
+  run. Side effect found: the NVIDIA vendor spoof makes UE show "Known issues with graphics
+  driver" (opens Safari); `metalfx`/vendor should become per-program or DLSS-detected. Tools:
+  scripts/gamekey.swift (keys to a Wine game), full-screen `screencapture -x` works.
 - **Graphics backends wired** (2026-10-22, main): `graphics` is now d3dmetal|wined3d|dxvk|dxmt
   (CrossCore `Backends.swift`: homes, `checkGraphics`, per-backend env, `prepareBackend`);
   WINEDLLPATH is `<backend>:<rt>/lib/wined3d:<rt>/lib/wine` for every backend, the build

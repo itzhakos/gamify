@@ -296,6 +296,63 @@ full-screen game, look for the Game Mode icon in the menu bar.
 4. **Stage 4**: DXMT and DXVK as selectable `graphics` backends (DX11 alternatives, DX9,
    32-bit Battle.net); fullscreen spatial upscaling only if DXMT does not cover the need.
 
+## Real-game test: Split Fiction in the user's Steam bottle (2026-10-22/23)
+
+Goal: DLSS and frame generation through MetalFX, plus D3DMetal vs DXMT. Setup: the user's
+`Steam` bottle (winecx-full, the rebuilt runtime, `metalfx` on, `hud` on), Split Fiction
+2001120 (UE 5.4, 88 GB, Friend's Pass licence), 3440x1440 display at 144 Hz, M4 Max.
+
+**Split Fiction has no DLSS.** The install has no `nvngx_dlss.dll`, no Streamline, only
+`amd_fidelityfx_dx12.dll`, and its executable carries only the FSR 3 plugin settings
+(`EFFXFSR3QualityMode`, `EFFXFSR3FrameGenUIMode`, ...). Press coverage agrees: FSR 3.1 only, with
+Native AA / Quality / Balanced / Performance and FSR 3 frame generation. So the DLSS->MetalFX
+bridge could not be exercised on it; a DLSS game is still needed for that (owned candidates in
+this Steam account: Cyberpunk 2077 and Portal with RTX, both DLSS 3 frame generation; neither
+fits the 22 GB that are free).
+
+### Measured (Metal HUD, "Play Local" screen with the 3D city scene behind it, screenshots in docs/)
+
+| Scenario (Engine.ini) | HUD backend | FPS | GPU time | Notes |
+|---|---|---|---|---|
+| D3DMetal, DX12 (game default) | D3D12, GPTK 3.0 | 59.97 | 13.3-13.4 ms | docs/split-fiction-d3dmetal-dx12.jpg |
+| D3DMetal, DX12, FSR3 cvars on (+ frame interpolation) | D3D12 | 59.97 | 13.3 ms | no change: the game's own settings override Engine.ini cvars |
+| D3DMetal, DX11 (`DefaultGraphicsRHI_DX11`) | D3D11, GPTK 3.0 | 59.97 | 11.9 ms | the build ships a DX11 RHI; D3DMetal logs "Unsupported API: D3D11 timestamp query" |
+| **DXMT**, DX11 | Metal (no GPTK line) | 59.97 | 12.7 ms | first real game on DXMT through `graphics dxmt`; docs/split-fiction-dxmt-dx11.jpg |
+| Title screen ("Press any button"), D3DMetal DX12 | D3D12 | 174 | 6.9 ms | the only uncapped screen |
+
+- The menus are capped at 60 fps by the game (16.67 ms present interval in every scenario);
+  `r.VSync=0` and `t.MaxFPS=0` in the user Engine.ini did not lift it, so **GPU time is the
+  comparable number**: on this scene D3DMetal DX11 (11.9 ms) < DXMT DX11 (12.7 ms) < D3DMetal
+  DX12 (13.3 ms). A gameplay benchmark with the in-game settings menu is the next step; the
+  per-frame HUD log (`MTL_HUD_LOG_ENABLED=1`, lines `metal-HUD: <frame>,<mem>,<mem>,<present ms>,<gpu ms>,...`
+  on the game's stdout) works for the native runs but not when the FSR3 swapchain is active.
+- One earlier 11-minute run with the FSR3 + frame-interpolation cvars showed, at 144 presents/s,
+  real frames of 12.3 ms GPU alternating with 0.96 ms frames (3534 frames sampled), i.e. FSR 3
+  frame generation producing frames through D3DMetal; which screen the game was on at that
+  point is unknown (no screenshot yet), so treat it as "FSR 3 FG runs" rather than a number.
+
+### Findings for the product
+
+1. **Vendor spoof side effect**: with `D3DM_VENDOR_ID=0x10DE` Unreal shows "WARNING: Known issues
+   with graphics driver" (NVIDIA vendor, unknown driver version) before the window appears,
+   and its default button opened Safari on NVIDIA's driver download page. `r.WarnOfBadDrivers=0`
+   in the user Engine.ini suppresses it, but the game deletes user Engine.ini files
+   (`chflags uchg` kept it). For games without DLSS the spoof only costs; `metalfx` (and with it
+   the vendor id) should become per-program, or the vendor id should only be set when the game
+   folder contains `nvngx_dlss.dll` / `sl.interposer.dll`. Open item.
+2. Steam launches games from **its own environment**: per-bottle settings reach a game only if
+   Steam itself was started with them (`cross steam` after a settings change); documented in
+   docs/app.md as "applies to programs started afterwards", but for Steam games that means
+   "after Steam is restarted".
+3. `cross run <bottle> <exe in steamapps>` blocks until the game exits (the launcher process
+   becomes the game); fine for the app, awkward for scripts.
+4. Keyboard input for tests: `scripts/gamekey.swift` (activates the Wine process via
+   NSRunningApplication and posts HID key events only while it is frontmost); CGEvent
+   `postToPid` and System Events `key code` do not reach the game. Full-screen `screencapture -x`
+   works for screenshots, per-window capture of Wine windows comes back black, and the
+   computer-use tools cannot address Wine processes (no bundle, LSUIElement).
+5. Metal HUD on DXMT shows a "Game Mode: Off" line (D3DMetal's HUD does not).
+
 ## Sources
 
 - Apple, Read Me shipped in `runtimes/d3dmetal/notices/Read Me.rtf` (evaluation environment 4.0 beta 2); MetalFX docs: https://developer.apple.com/documentation/metalfx , https://developer.apple.com/documentation/metalfx/mtlfxframeinterpolatordescriptor (`supportsDevice`, macOS 26.0+)
