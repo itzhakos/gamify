@@ -23,13 +23,15 @@ extension AppModel {
     /// Which stores run in the bottle (one libproc scan, by exe name) and its programs.
     func refreshStoresAndPrograms(_ name: String) async {
         guard let bottle = bottle(named: name), isDrivable(bottle) else { return }
-        let (running, list) = await Task.detached { () -> (Set<String>, [Program]) in
+        let (running, list, caches) = await Task.detached { () -> (Set<String>, [Program], [ShaderCache.Entry]) in
             let processes = Steam.bottleProcesses(in: bottle)
             let running = Set(Store.all.filter { !$0.running(in: processes).isEmpty }.map(\.id))
-            return (running, Programs.list(in: bottle))
+            return (running, Programs.list(in: bottle), ShaderCache.list())
         }.value
         if storesRunning[name] != running { storesRunning[name] = running }
         if programs[name] != list { programs[name] = list }
+        let byName = Dictionary(caches.map { ($0.name.lowercased(), $0) }, uniquingKeysWith: { a, _ in a })
+        if shaderCaches != byName { shaderCaches = byName }
     }
 
     /// Install… on a store row: download the official installer into downloads/<id>/ (once),

@@ -129,19 +129,13 @@ public struct Runtime {
     }
 
     /// The environment a process in `bottle` runs with. `base` is the environment
-    /// to inherit (WINEDEBUG, WINEESYNC, WINEMSYNC, MTL_HUD_ENABLED, DYLD fallback
-    /// paths and WINECX_GRAPHICS are honoured when already set, like the script).
+    /// to inherit (WINEDEBUG, DYLD fallback paths and WINECX_GRAPHICS are honoured when
+    /// already set, like the script). The bottle's performance settings decide WINEESYNC/
+    /// WINEMSYNC, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX and the D3DM_* variables, except
+    /// where `base` already sets one (non-empty): the caller's value wins.
     public func environment(for bottle: Bottle, base: [String: String] = ProcessInfo.processInfo.environment) throws -> [String: String] {
         var env = base
-        let graphics: Graphics
-        if let override = base["WINECX_GRAPHICS"], !override.isEmpty {
-            guard let g = Graphics(rawValue: override) else {
-                throw CrossError("unknown WINECX_GRAPHICS='\(override)' (d3dmetal|wined3d)")
-            }
-            graphics = g
-        } else {
-            graphics = bottle.config.graphics
-        }
+        let graphics = try self.graphics(for: bottle, base: base)
         let d3dUnix = d3dmetalHome.appendingPathComponent("x86_64-unix")
 
         env["WINEPREFIX"] = bottle.prefix.path
@@ -165,11 +159,14 @@ public struct Runtime {
         env["WINELOADER"] = wineloader.path
         env["WINESERVER"] = wineserver.path
         env["WINEDEBUG"] = nonEmpty(base["WINEDEBUG"]) ?? "-all"
-        env["WINEESYNC"] = nonEmpty(base["WINEESYNC"]) ?? "1"
-        // WINEMSYNC: not set by the scripts (this wineserver has esync only); passed
-        // through untouched when the caller sets it.
         env["DOTNET_EnableWriteXorExecute"] = "0"   // CrossOver sets this for .NET under Rosetta
-        env["MTL_HUD_ENABLED"] = nonEmpty(base["MTL_HUD_ENABLED"]) ?? "0"
+        // Performance settings (Performance.swift). WINEESYNC and WINEMSYNC are one choice:
+        // a caller that sets either keeps both as given.
+        let callerSync = PerformanceSettings.syncVariables.contains { nonEmpty(base[$0]) != nil }
+        for (key, value) in bottle.config.performance.environment(graphics: graphics) where nonEmpty(base[key]) == nil {
+            if callerSync && PerformanceSettings.syncVariables.contains(key) { continue }
+            env[key] = value
+        }
         env["PATH"] = [home.appendingPathComponent("bin").path, base["PATH"] ?? "/usr/bin:/bin"].joined(separator: ":")
         // winecx-full only: GStreamer's plugin dir and scanner are compiled in as absolute
         // paths; set them explicitly so the runtime keeps working if the tree is moved.

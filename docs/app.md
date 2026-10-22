@@ -211,8 +211,9 @@ For a Finder-like launch from a terminal:
 - Only the winecx runtime is driven, same as the CLI. Bottles on gptk/wine11/sikarugir
   are shown read-only.
 - Program list since 2026-10-20 (see "Stores and programs"); still no icons, no
-  winetricks/DLL overrides UI, no per-bottle env overrides (WINEDEBUG, MTL_HUD_ENABLED etc. come only from the
-  app's environment), no app icon.
+  winetricks/DLL overrides UI, no free-form per-bottle env overrides (WINEDEBUG comes only from the
+  app's environment; sync, HUD, AVX and the D3DM_* variables are Performance settings since
+  2026-10-22), no app icon.
 - The job list is in memory only; logs stay on disk. A game started by Steam is
   Steam's child, not a job, so use Kill Bottle for it.
 - The app bundle must stay inside the checkout, or have its root set in Settings.
@@ -898,3 +899,128 @@ SteamAPI_Init for the rest of the session.
 - The Check… sheet compiles and builds (`app/build.sh`); it was not clicked through on
   screen (the user's desktop was in use).
 
+## Performance settings (2026-10-22)
+
+Stage 1 of docs/perf-research.md: a per-bottle Performance layer (env vars + registry +
+files) in CrossCore, the CLI and the app, and the DLSS -> MetalFX plumbing for the D3DMetal
+3.0 we ship. No Wine rebuild; frame generation additionally needs the HAGS hack (stage 2,
+CW HACK 24905, another session's work in src/patches).
+
+### Design
+
+- `BottleConfig.performance` (`cli/Sources/CrossCore/Performance.swift`,
+  `PerformanceSettings`), stored as `"performance"` in cross.json. Every field has a
+  default and `BottleConfig` now decodes missing keys with defaults, so older cross.json
+  files (no `performance`, or only some fields) load unchanged; older apps ignore the key.
+- Environment variables are applied in `Runtime.environment(for:base:)`. A variable the
+  caller already sets (non-empty) wins over the setting, as WINEDEBUG always did;
+  WINEESYNC/WINEMSYNC count as one choice (a caller that sets either keeps both as given).
+  `WINECX_GRAPHICS` still overrides cross.json's graphics; D3DM_* variables are only set for
+  D3DMetal bottles.
+- Files and registry values: `Runtime.applyPerformance(to:force:)`. It runs at bottle
+  create (after wineboot), on a change of metalfx/retina/graphics (`force`: write the
+  registry values without looking), and before every launch (`runExe` and `steam`, which
+  every launch path goes through). Before a launch it only checks: files exist, and the
+  value is already in system.reg / user.reg (read as text, `Registry.value`); if so nothing
+  runs, otherwise one `wine regedit` (about a second). The files can lag behind a running
+  wineserver, which is why a settings change forces the write: found in testing, `retina on`
+  then `retina off` within a few seconds skipped the second write because user.reg did not
+  show the first one yet.
+- nvngx naming: Apple ships `x86_64-windows/nvngx-on-metalfx.dll` and
+  `x86_64-unix/nvngx-on-metalfx.so -> libd3dshared.dylib`; games load `nvngx.dll`.
+  `Runtime.ensureNVNGXNames()` adds `x86_64-windows/nvngx.dll` (a copy) and
+  `x86_64-unix/nvngx.so -> libd3dshared.dylib` (a symlink, like the other .so files; copies
+  crash D3DMetal, docs/d3dmetal3.md) next to Apple's names. Idempotent; run at bottle create
+  (before wineboot, which copies everything in WINEDLLPATH into system32, so new bottles get
+  nvngx.dll by themselves) and by `applyPerformance`. A read-only D3DMetal tree only gets a
+  warning. `scripts/package-app.sh` does the same in the bundle, so the packaged app ships
+  both names (this changes the runtime digest, so the next release is a full DMG update).
+
+### Mapping
+
+| Setting (cross.json) | Default | Maps to | Notes |
+|---|---|---|---|
+| `sync`: `esync` \| `msync` | esync | `WINEESYNC=1` or `WINEMSYNC=1` (exactly one) | msync = Mach semaphores; change only while nothing runs in the bottle (the wineserver keeps its mode). |
+| `metalfx` | on | D3DMetal only: `D3DM_ENABLE_METALFX=1`, `D3DM_VENDOR_ID=0x10DE`; `system32\nvngx.dll` + `nvapi64.dll` (copied from `runtimes/d3dmetal/x86_64-windows` when missing); `HKLM\Software\NVIDIA Corporation\Global\NGXCore\FullPath = C:\windows\system32` (REG_SZ) | Off: the variables are not set; files and registry value stay. With the NVIDIA vendor id Streamline-based games accept the adapter (it still says "AMD Compatibility Mode"). |
+| `avx` | off | `ROSETTA_ADVERTISE_AVX=1` | Without the XGETBV hack (stage 2, CW HACK 23427) a game that executes `xgetbv` after seeing AVX can still die. |
+| `raytracing` | default (absent) | `D3DM_SUPPORT_DXR=1` / `0` | D3DMetal only; absent = D3DMetal's default (on for M3 and later). |
+| `maxFPS` | absent | `D3DM_MAX_FPS=<n>` | D3DMetal only. |
+| `hud` | off | `MTL_HUD_ENABLED=1` (off: `0`, as before) | |
+| `retina` | off | `HKCU\Software\Wine\Mac Driver\RetinaMode = Y` / `N` (REG_SZ) | winemac.drv reads it at process start for the whole prefix (macdrv_main.c:415, "consistent for all processes in the prefix"): change it with nothing running. An absent value counts as off, so default bottles get no write. |
+| `vendorID` | absent | `D3DM_VENDOR_ID=0x....` | Advanced override; absent = 0x10DE while metalfx is on, D3DMetal's own (0x1002) otherwise. |
+
+Shader cache: D3DMetal keeps `$(getconf DARWIN_USER_CACHE_DIR)d3dm/<exe name>/` (e.g.
+`SplitFiction.exe/`, 874 MB on this Mac), one folder per executable name, shared by all
+bottles and untouched by bottle move/delete. `ShaderCache` (Performance.swift) lists and
+deletes these folders (by exe name, case-insensitive, never outside `d3dm/`).
+
+### CLI
+
+```
+cross bottle show <name>                           runtime, graphics, disk, location, each performance setting and its effect
+cross bottle set <name> sync esync|msync
+cross bottle set <name> metalfx on|off             (alias dlss)
+cross bottle set <name> avx on|off
+cross bottle set <name> raytracing on|off|default  (alias dxr)
+cross bottle set <name> maxfps <n>|off             (alias fps)
+cross bottle set <name> hud on|off
+cross bottle set <name> retina on|off
+cross bottle set <name> vendor <hex>|default       (0x10DE, 10de or decimal)
+cross cache clear <bottle> [<exe name>]            without an exe: list the cache folders with sizes,
+                                                   marking the bottle's programs; with one: delete it
+```
+
+`set graphics|metalfx|retina` also runs `applyPerformance` and prints what it changed;
+`bottle create` prints it after wineboot.
+
+### App
+
+- Bottle page, below the Run .exe / Wine Configuration box: a **Performance** box
+  (`PerformanceBox` in BottleView.swift) with Sync (ESync/MSync), DLSS via MetalFX
+  ("Games that offer DLSS get MetalFX upscaling and frame generation"; disabled for
+  wined3d), Advertise AVX, Ray tracing (Default/On/Off), FPS cap (empty = off), Metal HUD,
+  Retina (High Resolution), and the note that settings apply to programs started afterwards.
+  Each change saves cross.json (`AppModel.setPerformance`); a metalfx/retina change, a switch
+  to D3DMetal and a new bottle's finished wineboot run `applyPerformance` in the background.
+- Programs box: a `…` menu per program with **Clear Shader Cache (size)…** (asks first; the
+  item is disabled while D3DMetal has no cache for that exe). The cache list is refreshed
+  with the store/program refresh every 3 s.
+
+### Verified (2026-10-22, CROSS_BOTTLES in a scratch dir, winecx-full, graphics d3dmetal, runtimes from the checkout)
+
+- `cross bottle create perf --runtime winecx-full --graphics d3dmetal --storage unlimited`
+  (47 s): `runtimes/d3dmetal` got `x86_64-windows/nvngx.dll` (identical to
+  nvngx-on-metalfx.dll) and `x86_64-unix/nvngx.so -> libd3dshared.dylib`; wineboot put
+  `nvngx.dll` (and `nvapi64.dll`) into system32 by itself; system.reg has
+  `[Software\\NVIDIA Corporation\\Global\\NGXCore]` `"FullPath"="C:\\windows\\system32"`;
+  cross.json has the `performance` block with the defaults.
+- `cross env perf` per setting: defaults -> `D3DM_ENABLE_METALFX=1 D3DM_VENDOR_ID=0x10DE
+  MTL_HUD_ENABLED=0 WINEESYNC=1`; sync msync -> `WINEMSYNC=1` and no WINEESYNC; avx ->
+  `ROSETTA_ADVERTISE_AVX=1`; raytracing off -> `D3DM_SUPPORT_DXR=0`; maxfps 60 ->
+  `D3DM_MAX_FPS=60`; hud -> `MTL_HUD_ENABLED=1`; vendor 0x1234 with metalfx off ->
+  `D3DM_VENDOR_ID=0x1234` and no D3DM_ENABLE_METALFX; graphics wined3d -> no D3DM_*
+  variables. Caller overrides: `WINEESYNC=1 MTL_HUD_ENABLED=0 D3DM_MAX_FPS=30 cross env`
+  on an msync/HUD/60 fps bottle prints exactly those values (and no WINEMSYNC);
+  `WINEMSYNC=1` on an esync bottle prints WINEMSYNC=1 only.
+- `cross cmd perf /c reg query ...`: `RetinaMode REG_SZ N` after `retina off`, `Y` after
+  `retina on`; `NGXCore FullPath REG_SZ C:\windows\system32`.
+- `src/d3dtest/d3d11test.exe` (`make -C src/d3dtest`): metalfx on -> `AMD Compatibility
+  Mode (vendor 0x10de device 0x66af)`, metalfx off -> `vendor 0x1002`.
+- msync bottle: `WINEDEBUG=+msync cross cmd perf /c ver` prints "msync: up and running" and
+  `Microsoft Windows 10.0.19043`; d3d11test runs (vendor 0x10de) under msync.
+- Pre-launch repair: with `system32\nvngx.dll` deleted, `cross run perf d3d11test.exe`
+  copied it back and ran; the next launch did nothing extra.
+- Old/partial cross.json: a file with only runtime + graphics shows every default; one with
+  `{"runtime":"winecx","performance":{"sync":"msync","maxFPS":90}}` loads (graphics
+  d3dmetal, msync, 90 fps) and is written back complete by the next `set`.
+- `cross cache clear perf` lists the 14 cache folders (SplitFiction.exe 874.2 MB); `cross cache
+  clear perf D3D11TEST.EXE` deleted `d3d11test.exe/` (266 KB); a second call and `../foo`
+  fail with "no shader cache for ...".
+- The app builds (`app/build.sh`) and started on the scratch bottles folder, but the
+  Performance box and Clear Shader Cache… were **not clicked through on screen** (screen
+  access to the app was declined). The app writes through the same `saveConfig` /
+  `applyPerformance` paths as the CLI checks above.
+- **Not verified: DLSS through MetalFX itself.** No DLSS game is installed in a bottle on
+  this Mac (Split Fiction, the natural test, was in bottle `cx`, not on disk; only its
+  shader cache is). Expected check: turn DLSS on in the game with the Metal HUD on; the HUD
+  shows MetalFX. Frame generation also needs macOS 26+ and the stage 2 Wine patch.

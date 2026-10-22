@@ -28,6 +28,8 @@ struct BottleView: View {
                 storageRow
                 actions
                     .disabled(model.storageWork[bottle.name] != nil)
+                PerformanceBox(bottle: bottle)
+                    .disabled(model.storageWork[bottle.name] != nil)
                 HStack(alignment: .top, spacing: 12) {
                     storesBox
                     ProgramsBox(bottle: bottle)
@@ -479,6 +481,85 @@ struct BottleView: View {
         let args = exeArguments.split(separator: " ").map(String.init)
         model.runExe(url, arguments: args, in: bottle.name)
         selectedJob = nil
+    }
+}
+
+/// The bottle page's Performance box: `BottleConfig.performance` (Performance.swift), saved
+/// to cross.json on every change and used by programs started afterwards.
+struct PerformanceBox: View {
+    @EnvironmentObject var model: AppModel
+    let bottle: Bottle
+
+    private var d3dmetal: Bool { bottle.config.graphics == .d3dmetal }
+
+    /// A binding to one setting that saves the whole set when it changes.
+    private func setting<T>(_ keyPath: WritableKeyPath<PerformanceSettings, T>) -> Binding<T> {
+        Binding(get: { bottle.config.performance[keyPath: keyPath] },
+                set: { value in
+                    var p = bottle.config.performance
+                    p[keyPath: keyPath] = value
+                    model.setPerformance(p, for: bottle.name)
+                })
+    }
+
+    /// Ray tracing: 0 = D3DMetal's default, 1 = on, 2 = off.
+    private var raytracing: Binding<Int> {
+        Binding(get: { bottle.config.performance.raytracing.map { $0 ? 1 : 2 } ?? 0 },
+                set: { setting(\.raytracing).wrappedValue = $0 == 0 ? nil : $0 == 1 })
+    }
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 16) {
+                    Picker("Sync", selection: setting(\.sync)) {
+                        Text("ESync").tag(SyncMode.esync)
+                        Text("MSync").tag(SyncMode.msync)
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .help("How Windows sync objects are implemented: ESync (WINEESYNC=1, the default) or MSync (WINEMSYNC=1, Mach semaphores; some games run better with it). Change it only while nothing runs in this bottle.")
+                    Toggle("DLSS via MetalFX", isOn: setting(\.metalfx))
+                        .disabled(!d3dmetal)
+                        .help(d3dmetal
+                              ? "Games that offer DLSS get MetalFX upscaling and frame generation (frame generation needs macOS 26 and a DLSS 3 game). The GPU is reported as NVIDIA (D3DM_VENDOR_ID=0x10DE), nvngx.dll and nvapi64.dll are put in system32. Turn DLSS on in the game's settings."
+                              : "DLSS via MetalFX needs the D3DMetal graphics backend")
+                    Toggle("Advertise AVX", isOn: setting(\.avx))
+                        .help("ROSETTA_ADVERTISE_AVX=1: Rosetta reports AVX/AVX2 to games. Some newer games refuse to start without it; leave it off otherwise.")
+                    Picker("Ray tracing", selection: raytracing) {
+                        Text("Default").tag(0)
+                        Text("On").tag(1)
+                        Text("Off").tag(2)
+                    }
+                    .fixedSize()
+                    .disabled(!d3dmetal)
+                    .help("DirectX ray tracing in D3DMetal (D3DM_SUPPORT_DXR). Default: on for M3 and later. Off can make DX12 games that turn ray tracing on by themselves faster and steadier.")
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: 16) {
+                    LabeledContent("FPS cap") {
+                        TextField("FPS cap", value: setting(\.maxFPS), format: .number, prompt: Text("off"))
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 56)
+                    }
+                    .fixedSize()
+                    .disabled(!d3dmetal)
+                    .help("Frame cap inside D3DMetal (D3DM_MAX_FPS); empty for none. Cooler and steadier, pairs well with frame generation.")
+                    Toggle("Metal HUD", isOn: setting(\.hud))
+                        .help("MTL_HUD_ENABLED=1: Apple's Metal performance HUD (frame rate, GPU time; shows MetalFX when DLSS is bridged)")
+                    Toggle("Retina (High Resolution)", isOn: setting(\.retina))
+                        .help("Off: Windows renders at half the Retina resolution and macOS scales it up (faster). On: native pixels, sharper, about four times the pixels to render. Change it only while nothing runs in this bottle.")
+                    Spacer(minLength: 0)
+                }
+                Text("Applies to programs started afterwards; change Sync and Retina only while nothing runs in this bottle.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .font(.callout)
+            .padding(4)
+        } label: {
+            Label("Performance", systemImage: "gauge.with.dots.needle.67percent")
+        }
     }
 }
 

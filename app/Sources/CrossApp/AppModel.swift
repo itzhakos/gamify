@@ -84,6 +84,9 @@ final class AppModel: ObservableObject {
     @Published var programs: [String: [Program]] = [:]
     /// An installer opened with the app or dropped on a bottle page: Install or Just Run?
     @Published var installPrompt: InstallPrompt?
+    /// D3DMetal's shader cache folders by lowercased exe name (ShaderCache, shared by all
+    /// bottles), for Clear Shader Cache… in the Programs box.
+    @Published var shaderCaches: [String: ShaderCache.Entry] = [:]
 
     struct SteamStuckPrompt: Identifiable, Equatable {
         let id = UUID()
@@ -687,6 +690,7 @@ final class AppModel: ObservableObject {
             alertMessage = "\(error)"
         }
         reloadBottles()
+        if graphics == .d3dmetal { applyPerformance(to: bottle) }   // nvngx.dll + NGXCore for MetalFX
     }
 
     /// `cross bottle create`: writes cross.json, then runs wineboot --init as a job so
@@ -709,9 +713,17 @@ final class AppModel: ObservableObject {
         }
         reloadBottles()
         selection = name
-        return start("wineboot", in: name) { runtime, bottle, _ in
+        let job = start("wineboot", in: name) { runtime, bottle, _ in
             try runtime.wineboot(for: bottle)
         }
+        if let job {
+            // MetalFX's NGXCore registry value and RetinaMode need the initialised prefix
+            Task {
+                guard await waitForExit(job) == .exited(0), let bottle = bottle(named: name) else { return }
+                applyPerformance(to: bottle, force: false)
+            }
+        }
+        return job
     }
 
     func deleteBottle(_ name: String) {
