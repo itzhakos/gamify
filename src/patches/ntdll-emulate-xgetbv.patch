@@ -1,0 +1,82 @@
+ntdll-emulate-xgetbv.patch - Gamify patch over CrossOver 25.1.0 Wine (dlls/ntdll/unix), LGPL-2.1-or-later.
+Port of CW HACK 23427 from CrossOver 26.1 (dlls/ntdll/unix/signal_x86_64.c): when an invalid-opcode
+fault hits an XGETBV (0f 01 d0) with ecx == 0, emulate it: edx:eax = 0xe7 (x87, SSE, AVX, AVX-512 state)
+on macOS 15+ else 0x07, skip 3 bytes. For Rosetta versions without XGETBV, so a game that sees AVX
+in cpuid (ROSETTA_ADVERTISE_AVX=1) and then reads xcr0 does not die with an illegal instruction.
+Rosetta on macOS 27 executes XGETBV itself (no fault), so there the hook never runs.
+Details: docs/codeweavers-patches.md "Ported from CrossOver 26.1".
+
+--- a/dlls/ntdll/unix/signal_x86_64.c	2026-10-22 21:08:56
++++ b/dlls/ntdll/unix/signal_x86_64.c	2026-10-22 21:09:48
+@@ -84,6 +84,9 @@
+ /* CW Hack 24256 */
+ #include <sys/sysctl.h>
+ static BOOL is_rosetta2;
++
++/* CW Hack 23427 */
++static BOOL sequoia_or_later = FALSE;
+ #endif
+ 
+ /***********************************************************************
+@@ -1835,6 +1838,41 @@
+         return FALSE;
+     }
+     return FALSE;
++}
++
++/***********************************************************************
++ *           emulate_xgetbv
++ *
++ * Check if the fault location is an Intel XGETBV instruction for xcr0 and
++ * emulate it if so. Actual Intel hardware supports this instruction, so this
++ * will only take effect under Rosetta.
++ * CW HACK 23427 (ported from CrossOver 26.1 by Gamify)
++ */
++static inline BOOL emulate_xgetbv( ucontext_t *sigcontext, CONTEXT *context )
++{
++    BYTE instr[3];
++    unsigned int len = virtual_uninterrupted_read_memory( (BYTE *)context->Rip, instr, sizeof(instr) );
++
++    /* Prefixed xgetbv is illegal, so no need to check. */
++    if (len < 3 || instr[0] != 0x0f || instr[1] != 0x01 || instr[2] != 0xd0 ||
++        (RCX_sig(sigcontext) & 0xffffffff) != 0 /* only handling xcr0 (ecx==0) */)
++    {
++        return FALSE;
++    }
++
++    RDX_sig(sigcontext) = 0;
++    if (sequoia_or_later)
++    {
++        /* Arguably we should only claim AVX support if ROSETTA_ADVERTISE_AVX is
++           set, but presumably apps will also check cpuid. */
++        RAX_sig(sigcontext) = 0xe7;  /* fpu/mmx, sse, avx, full avx-512 */
++    }
++    else
++        RAX_sig(sigcontext) = 0x07;  /* fpu/mmx, sse */
++
++    RIP_sig(sigcontext) += 3;
++    TRACE_(seh)( "emulated an XGETBV instruction\n" );
++    return TRUE;
+ }
+ #endif
+ 
+@@ -2088,6 +2126,8 @@
+ #ifdef __APPLE__
+         /* CW HACK 20186 */
+         if (handle_cet_nop( ucontext, &context.c )) return;
++        /* CW HACK 23427 */
++        if (emulate_xgetbv( ucontext, &context.c )) return;
+ #endif
+         rec.ExceptionCode = EXCEPTION_ILLEGAL_INSTRUCTION;
+         break;
+@@ -2677,6 +2717,10 @@
+         else
+             is_rosetta2 = ret;
+     }
++
++    /* CW Hack 23427: __builtin_available presumably isn't signal-safe. */
++    if (__builtin_available( macOS 15.0, * ))
++        sequoia_or_later = TRUE;
+ #endif
+ 
+     sig_act.sa_mask = server_block_set;

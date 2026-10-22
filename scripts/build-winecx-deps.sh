@@ -14,8 +14,11 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$ROOT/upstream/crossover-sources-25.1.0/sources"
-PREFIX="$ROOT/runtimes/winecx"
-BUILD="$ROOT/build/x86_64"
+# WINECX_PREFIX / WINECX_BUILD: same meaning as in scripts/build-winecx.sh (a second
+# runtime next to the live one). Each dep is skipped when its dylib is already in the prefix,
+# so on a `cp -Rc` clone of the live runtime this is a no-op.
+PREFIX="${WINECX_PREFIX:-$ROOT/runtimes/winecx}"
+BUILD="${WINECX_BUILD:-$ROOT/build/x86_64}"
 SDK="$(xcrun --show-sdk-path)"
 JOBS="$(sysctl -n hw.ncpu)"
 mkdir -p "$PREFIX" "$BUILD"

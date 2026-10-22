@@ -408,3 +408,73 @@ Most CORE hacks are small and local (ntdll, winemac.drv, wow64cpu, server/mach.c
 pieces are esync/msync and `d3dmetal.c`. For D3DMetal 3.0/4.0 the reference would be newer
 CrossOver sources (26.x) at `https://media.codeweavers.com/pub/crossover/source/`, diffed the
 same way.
+
+## Ported from CrossOver 26.1 (2026-10-22)
+
+CrossOver 26.1's sources (`crossover-sources-26.1.0.tar.gz`, Wine 11.0) carry hacks that our
+25.1 tree lacks (docs/perf-research.md sections 1, 3 and 7 say why they matter). Three changes
+are now `src/patches/*.patch` files, applied by `scripts/build-winecx*.sh` before configure like
+`winemac-qt5-opengl.patch`. Build, swap and test results: docs/runtime-full.md "Ported from
+CrossOver 26.1: rebuild and swap".
+
+| Patch | From | What |
+|---|---|---|
+| `win32u-d3dkmt-hwsched.patch` | CW HACK 24905, 26.1 `dlls/win32u/d3dkmt.c` | `NtGdiDdDDIQueryAdapterInfo` reports hardware-accelerated GPU scheduling (HAGS) for D3DMetal |
+| `ntdll-emulate-xgetbv.patch` | CW HACK 23427, 26.1 `dlls/ntdll/unix/signal_x86_64.c` | Emulates `XGETBV` (xcr0) in the invalid-opcode handler |
+| `loader-plist-gamemode.patch` | ours (not in 26.1) | Game Mode keys in the wineloader's embedded Info.plist |
+
+### win32u-d3dkmt-hwsched.patch (HAGS, CW HACK 24905)
+
+- Wine 10.0's `NtGdiDdDDIQueryAdapterInfo` was a stub returning `STATUS_NOT_IMPLEMENTED` for
+  every type. The port is 26.1's function: `KMTQAITYPE_CHECKDRIVERUPDATESTATUS` -> `FALSE`,
+  `KMTQAITYPE_DRIVERVERSION` -> `KMT_DRIVERVERSION_WDDM_1_3`, and `KMTQAITYPE_WDDM_2_7_CAPS` ->
+  `HwSchSupported = HwSchEnabled = HwSchEnabledByDefault = 1` when the D3DMetal backend is active.
+  Every other type (and WDDM_2_7_CAPS without D3DMetal) still returns `STATUS_NOT_IMPLEMENTED`.
+  Like 26.1, the adapter handle is only checked to be non-zero.
+- Differences from 26.1: the backend is read from **`WINECX_GRAPHICS`** (`d3dmetal`, set by
+  `Runtime.environment` in CrossCore and by `scripts/winecx-env.sh`); CrossOver's
+  `CX_ACTIVE_GRAPHICS_BACKEND=d3dmetal` is accepted too. **`WINE_DISABLE_HARDWARE_SCHEDULING`**
+  set to anything but empty/`0` returns success with all three bits 0 (Proton's opt-out; Proton
+  itself only reports HAGS for NVIDIA's Vulkan driver, after `vkGetPhysicalDeviceProperties2`).
+- Wine 10.0's headers lacked the types: `D3DKMT_DRIVERVERSION` (`KMT_DRIVERVERSION_WDDM_*`) is
+  added to `include/ddk/d3dkmthk.h` and `D3DKMT_WDDM_2_7_CAPS` to `include/d3dkmdt.h`, both copied
+  from 26.1's headers; `d3dkmt.c` includes `d3dkmdt.h` as in 26.1. The enum value
+  `KMTQAITYPE_WDDM_2_7_CAPS` (70) was already there.
+- Call path: gdi32 `D3DKMTQueryAdapterInfo` is a forward to `win32u.NtGdiDdDDIQueryAdapterInfo`
+  (`dlls/gdi32/gdi32.spec`), a syscall into the unix side (`win32u.spec`
+  `-syscall`), so the env vars are read with `getenv` from the Mac process environment.
+  D3DMetal's own `dxgi.dll` exports `D3DKMTEnumAdapters2` etc., but `D3DKMTQueryAdapterInfo`
+  that DLSS-G (NVIDIA Streamline) uses goes through gdi32 -> win32u, i.e. Wine.
+- Why: DLSS Frame Generation through D3DMetal's MetalFX bridge refuses to run without HAGS
+  (Heroic PR #5984 needed a patched gdi32 for exactly this query).
+
+### ntdll-emulate-xgetbv.patch (CW HACK 23427)
+
+- `emulate_xgetbv()` is 26.1's code verbatim: in `segv_handler`'s `TRAP_x86_PRIVINFLT` case,
+  after `handle_cet_nop` (CW HACK 20186), an instruction `0f 01 d0` with `ecx == 0` gets
+  `edx:eax = 0xe7` (x87, SSE, AVX, AVX-512 state) on macOS 15+ or `0x07` otherwise, and RIP
+  skips the 3 bytes. `sequoia_or_later` is a static set in `signal_init_process` with
+  `__builtin_available(macOS 15.0, *)` (not signal-safe, hence evaluated once), next to the
+  existing `is_rosetta2` (CW Hack 24256). Our tree's `sonoma_or_later()` in `loader.c` is
+  unrelated and untouched.
+- **Rosetta on macOS 27 does not need it**: `XGETBV` executes natively under Rosetta and returns
+  `0x7`, with or without `ROSETTA_ADVERTISE_AVX=1`, in a plain macOS x86_64 process and in Wine
+  (old and new runtime alike; see the avxtest results in docs/runtime-full.md). So the handler
+  never runs on this Mac and its `0xe7` answer was not observed. It is kept for older Rosetta
+  versions (Gamify supports macOS 14+), where an AVX-advertising cpuid followed by `xgetbv`
+  would otherwise be an illegal instruction.
+
+### loader-plist-gamemode.patch (Game Mode)
+
+- `loader/wine_info.plist.in` is linked into `bin/wine` (= `wineloader`) as
+  `__TEXT,__info_plist` (`-sectcreate` in `WINELOADER_LDFLAGS`, CrossOver Hack 10913: bundle id
+  `com.codeweavers.CrossOver.wineloader`, `LSUIElement`). 26.1's plist is identical to 25.1's.
+  The patch adds `LSApplicationCategoryType = public.app-category.games`,
+  `GCSupportsGameMode = true` (macOS 14+) and `LSSupportsGameMode = true` (macOS 26+). These
+  only make the process eligible; macOS turns Game Mode on when the app is frontmost and full
+  screen (Apple developer forum thread 782343).
+- **Result: no effect as built.** LaunchServices ignores the loader's embedded plist altogether:
+  every Wine process (old and new runtime) is registered as `"wine"` with no bundle id, not as
+  "CrossOver-Hosted Application" / UIElement, and gamepolicyd logs `Ignoring` for it. Game Mode
+  most likely needs the loader in a real `.app` bundle (`Contents/Info.plist` with these keys);
+  not tried. Evidence in docs/runtime-full.md "Ported from CrossOver 26.1: rebuild and swap".

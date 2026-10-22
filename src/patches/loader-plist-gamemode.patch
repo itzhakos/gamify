@@ -1,0 +1,21 @@
+loader-plist-gamemode.patch - Gamify patch over CrossOver 25.1.0 Wine (loader), LGPL-2.1-or-later.
+Game Mode eligibility keys in the Info.plist that is linked into bin/wine (wineloader) as
+__TEXT,__info_plist: LSApplicationCategoryType = public.app-category.games, GCSupportsGameMode and
+LSSupportsGameMode = true. macOS turns Game Mode on when such an app is frontmost and full screen.
+Details: docs/codeweavers-patches.md "Ported from CrossOver 26.1".
+
+--- a/loader/wine_info.plist.in	2026-10-22 21:08:56
++++ b/loader/wine_info.plist.in	2026-10-22 21:09:57
+@@ -26,5 +26,12 @@
+     <string>WineApplication</string>
+     <key>LSUIElement</key>
+     <string>1</string>
++    <!-- Gamify: Game Mode eligibility (macOS turns it on for a frontmost full-screen game) -->
++    <key>LSApplicationCategoryType</key>
++    <string>public.app-category.games</string>
++    <key>GCSupportsGameMode</key>
++    <true/>
++    <key>LSSupportsGameMode</key>
++    <true/>
+ </dict>
+ </plist>
