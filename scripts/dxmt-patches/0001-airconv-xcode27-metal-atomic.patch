@@ -1,0 +1,13 @@
+--- a/src/airconv/shaders/air_tessellation.metal	2026-10-22 21:19:43
++++ b/src/airconv/shaders/air_tessellation.metal	2026-10-22 21:19:43
+@@ -150,7 +150,9 @@
+ 
+ int
+ get_next_index(threadgroup int *out_count) {
+-  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed), __METAL_MEMORY_SCOPE_THREADGROUP__);
++  // Xcode 27's metal compiler changed the __metal_atomic_* builtin signature; use the
++  // public API (same relaxed threadgroup-scope atomic).
++  return atomic_fetch_add_explicit((threadgroup atomic_int *)out_count, 1, memory_order_relaxed);
+ }
+ 
+ template <partitioning partition>

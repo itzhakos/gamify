@@ -1,0 +1,57 @@
+--- a/src/d3d11/d3d11_device.cpp	2026-10-22 21:23:22
++++ b/src/d3d11/d3d11_device.cpp	2026-10-22 21:23:22
+@@ -1948,7 +1948,11 @@
+     DxvkDeviceFeatures supported = adapter->features();
+     DxvkDeviceFeatures enabled   = {};
+ 
+-    enabled.core.features.geometryShader                          = VK_TRUE;
++    // Upstream MoltenVK has no geometry shaders, cull distances or (on some GPUs)
++    // tessellation; CodeWeavers' MoltenVK fork does. Enable them only when present,
++    // like Gcenx's DXVK-macOS, so FL 11_0 works on upstream MoltenVK 1.4 (games that
++    // actually use a GS then fail at pipeline creation instead of at device creation).
++    enabled.core.features.geometryShader                          = supported.core.features.geometryShader;
+     enabled.core.features.robustBufferAccess                      = VK_TRUE;
+     enabled.core.features.shaderStorageImageWriteWithoutFormat    = VK_TRUE;
+     enabled.core.features.depthBounds                             = supported.core.features.depthBounds;
+@@ -1981,7 +1985,7 @@
+       enabled.core.features.sampleRateShading                     = VK_TRUE;
+       enabled.core.features.samplerAnisotropy                     = supported.core.features.samplerAnisotropy;
+       enabled.core.features.shaderClipDistance                    = VK_TRUE;
+-      enabled.core.features.shaderCullDistance                    = VK_TRUE;
++      enabled.core.features.shaderCullDistance                    = supported.core.features.shaderCullDistance;
+       enabled.core.features.textureCompressionBC                  = VK_TRUE;
+       enabled.extDepthClipEnable.depthClipEnable                  = supported.extDepthClipEnable.depthClipEnable;
+       enabled.extHostQueryReset.hostQueryReset                    = VK_TRUE;
+@@ -2017,7 +2021,7 @@
+       enabled.core.features.shaderFloat64                         = supported.core.features.shaderFloat64;
+       enabled.core.features.shaderInt64                           = supported.core.features.shaderInt64;
+       enabled.core.features.shaderStorageImageReadWithoutFormat   = supported.core.features.shaderStorageImageReadWithoutFormat;
+-      enabled.core.features.tessellationShader                    = VK_TRUE;
++      enabled.core.features.tessellationShader                    = supported.core.features.tessellationShader;
+     }
+     
+     if (featureLevel >= D3D_FEATURE_LEVEL_11_1) {
+--- a/src/d3d9/d3d9_device.cpp	2026-10-22 21:23:22
++++ b/src/d3d9/d3d9_device.cpp	2026-10-22 21:23:22
+@@ -3914,8 +3914,10 @@
+     DxvkDeviceFeatures supported = adapter->features();
+     DxvkDeviceFeatures enabled = {};
+ 
+-    // Geometry shaders are used for some meta ops
+-    enabled.core.features.geometryShader = VK_TRUE;
++    // Geometry shaders are used for some meta ops (only without
++    // VK_EXT_shader_viewport_index_layer, which MoltenVK has). Upstream MoltenVK has
++    // no geometry shaders or cull distances: enable them only when present.
++    enabled.core.features.geometryShader = supported.core.features.geometryShader;
+     enabled.core.features.robustBufferAccess = VK_TRUE;
+     enabled.extRobustness2.robustBufferAccess2 = supported.extRobustness2.robustBufferAccess2;
+ 
+@@ -3944,7 +3946,7 @@
+     enabled.core.features.sampleRateShading = VK_TRUE;
+     enabled.core.features.samplerAnisotropy = supported.core.features.samplerAnisotropy;
+     enabled.core.features.shaderClipDistance = VK_TRUE;
+-    enabled.core.features.shaderCullDistance = VK_TRUE;
++    enabled.core.features.shaderCullDistance = supported.core.features.shaderCullDistance;
+ 
+     // Ensure we support real BC formats and unofficial vendor ones.
+     enabled.core.features.textureCompressionBC = VK_TRUE;

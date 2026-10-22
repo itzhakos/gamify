@@ -1,0 +1,10 @@
+--- a/src/util/com/com_guid.cpp	2026-10-22 21:19:43
++++ b/src/util/com/com_guid.cpp	2026-10-22 21:19:43
+@@ -8,6 +8,7 @@
+  * See <https://github.com/doitsujin/dxvk/blob/master/LICENSE>
+  */
+ 
++#include <iomanip> // std::setw/setfill, no longer pulled in by other headers in GCC 16
+ #include <mutex>
+ #include <unordered_set>
+ 

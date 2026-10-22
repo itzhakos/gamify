@@ -62,6 +62,18 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
+- **DXVK + DXMT** (2026-10-22, branch claude/dxmt-dxvk-6b922e, not wired into cli/app yet):
+  `runtimes/dxvk` = DXVK 1.10.3 from CrossOver's tree (`scripts/build-dxvk.sh`, mingw-w64,
+  patches in scripts/dxvk-patches: GS/cull/tess optional for upstream MoltenVK) for D3D9/10/11
+  32+64-bit over winecx-full's MoltenVK; `runtimes/dxmt` = DXMT v0.80 (last MIT, `scripts/build-dxmt.sh`
+  incl. LLVM 15 x86_64 built here) for D3D10/11 32+64-bit on Metal, no Wine patch needed (our
+  winemac.drv exports `macdrv_functions`). Both are Wine builtins selected by
+  `WINEDLLPATH=<backend>:<rt>/lib/wined3d:<rt>/lib/wine` once Wine's i386 d3d DLLs and d3d9 move
+  to lib/wined3d too (docs/proposed/build-winecx-wined3d-layout.patch; then d3dmetal needs
+  lib/wined3d in its path as well); DXMT also needs winemetal.dll in system32/syswow64, DXVK
+  `vulkan-1=b`. d3d11test 32/64-bit FL 11_0 on both, d3d9test on DXVK, all at the 120 Hz cap
+  like D3DMetal. Battle.net: DXVK fixes the GPU side (+ `--in-process-gpu`), the spinner stays
+  because CEF's renderer hits a CHECK on every backend. docs/dxmt-dxvk.md, `scripts/test-dxbackends.sh`.
 - **Runtimes rebuilt and swapped** (2026-10-22): `runtimes/winecx` and `runtimes/winecx-full` now
   carry the three `src/patches` ported from CrossOver 26.1 (`win32u-d3dkmt-hwsched.patch` = HAGS
   for DLSS Frame Generation, `ntdll-emulate-xgetbv.patch`, `loader-plist-gamemode.patch`); the

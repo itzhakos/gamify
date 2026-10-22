@@ -366,4 +366,4 @@ gstreamer core 10 s, base 12 s, good 6 s, bad 11 s, ugly 4 s, SDL2 22 s, MoltenV
   only) when a game needs them.
 - `runtimes/winecx` (non-full) has no GStreamer at all, so WMV only plays on winecx-full.
 - CodeWeavers' MoltenVK (transform feedback etc.) needs their non-public SPIRV-Cross fork.
-- DXVK / DXMT on top of MoltenVK: not tried yet.
+- DXVK / DXMT: built and tested on winecx-full on 2026-10-22, see docs/dxmt-dxvk.md.
