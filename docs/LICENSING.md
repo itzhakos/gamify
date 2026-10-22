@@ -20,8 +20,11 @@ in the original before a release.
 | GStreamer 1.24.2 (not built yet) | LGPL-2.1+ core; plugins vary | Yes, with source | Yes, with source | Ship only LGPL plugins; **unclear**: codec patents |
 | FFmpeg 6.1.6 (libavutil/avcodec/avformat/avfilter, winecx-full only) + gst-libav 1.24.2 | LGPL-2.1+ (built without `--enable-gpl`/`--enable-nonfree`; the build script aborts otherwise) | Yes, with source | Yes, with source | Ship as separate dylibs, publish the FFmpeg tarball + configure line (scripts/build-winecx-full-deps.sh section 6); **unclear**: WMV/WMA patents, same question as H.264/AAC |
 | SDL2 (not built yet) | zlib | Yes | Yes | Notice |
-| MoltenVK (not built yet) | Apache-2.0 | Yes | Yes | LICENSE in notices |
-| DXVK / vkd3d-proton / DXMT (if added) | zlib / LGPL-2.1 / MIT | Yes | Yes | Notices (+ source for LGPL) |
+| MoltenVK 1.4.2 (upstream, in `runtimes/winecx-full/lib`, docs/runtime-full.md) | Apache-2.0 | Yes | Yes | LICENSE in notices; state modifications if we ever patch it |
+| DXVK 1.10.3 (CrossOver 25.1 fork + `scripts/dxvk-patches/`, `runtimes/dxvk`, docs/dxmt-dxvk.md) | zlib (`sources/dxvk/LICENSE`, copied to `runtimes/dxvk/LICENSE`) | Yes | Yes | Notice; zlib asks that modified versions be marked as such: say "patched, see scripts/dxvk-patches" |
+| DXMT v0.80 (commit 589adb7 + `scripts/dxmt-patches/`, `runtimes/dxmt`) | **MIT** (`LICENSE` at that commit, copied to `runtimes/dxmt/LICENSE`); contains MIT code from Microsoft (DXBCParser) and DXVK-derived code (zlib), NVIDIA nvapi headers (MIT) | Yes | Yes | Notices for DXMT, DXBCParser, DXVK, nvapi. **Releases after v0.80 are LGPL**: `scripts/build-dxmt.sh` refuses a non-MIT tree; moving past 0.80 means LGPL obligations (source, replaceable DLLs) |
+| LLVM 15.0.7 (static libs inside DXMT's `winemetal.so`) | Apache-2.0 with LLVM Exceptions (`llvm/LICENSE.TXT`) | Yes | Yes | Ship LICENSE.TXT in notices; the LLVM exception only covers compiler runtime pieces, so Apache-2.0 §4 applies to these linked libraries |
+| vkd3d-proton (not used) | LGPL-2.1 | Yes, with source | Yes, with source | Notices + source |
 | Wine Mono 9.4.0 / Wine Gecko 2.47.4 | Mono: MIT + LGPL + MS-PL mix; Gecko: MPL-2.0 | Yes, or download on demand | Same | Let Wine download them from WineHQ, as upstream does |
 | **Apple D3DMetal** (GPTK 3.0, `runtimes/d3dmetal`) | Apple GPTK license EA18380 | **Allowed, non-commercial only** | **No** | Free build may bundle (with notices); paid build: user installs GPTK, app extracts |
 | **D3DMetal 2.1 from the CrossOver trial** (`runtimes/d3dmetal-2.1`) | CrossOver license (no redistribution) | **No** | **No** | **Local-only.** Never ship; obtain 2.1 from Apple if we need it |
@@ -116,6 +119,14 @@ the Wine executables, or document how to re-sign).
   the license text; state modifications if we patch it.
 - Same for **DXVK** (`sources/dxvk/LICENSE`, zlib), **vkd3d** (`sources/vkd3d/COPYING`, LGPL
   2.1), **DXMT** (MIT, per CrossOver Appendix A) if we add them.
+- 2026-10-22: DXVK 1.10.3 and DXMT v0.80 are built (`scripts/build-dxvk.sh`,
+  `scripts/build-dxmt.sh`, docs/dxmt-dxvk.md). DXVK: zlib, built from CrossOver's tree with three
+  small patches (`scripts/dxvk-patches/`); zlib clause 2 wants altered versions marked, so the
+  notice says "patched". DXMT: v0.80 is the last MIT release (checked in `LICENSE` of commit
+  589adb780354b461645b29999cefaf533594ee99); our two patches (`scripts/dxmt-patches/`) are our own
+  one-liners, not the later LGPL upstream commits. DXMT's `winemetal.so` statically links LLVM
+  15.0.7 (Apache-2.0 with LLVM Exceptions): ship LLVM's LICENSE.TXT. DXMT's `nvapi64.dll` is
+  built against NVIDIA's nvapi headers from github.com/NVIDIA/nvapi (MIT, `License.txt`).
 
 ## 4. Wine Mono and Wine Gecko
 
@@ -306,7 +317,7 @@ newer `winemac.drv` hook table first.
    each shipped component: name, version, upstream URL, license name and the full license text:
    Wine (LGPL 2.1 + AUTHORS pointer), every `libs/` library listed in §1, gmp, nettle, gnutls
    (+ libtasn1, libunistring), FreeType (FTL credit), and later GStreamer, SDL2, MoltenVK,
-   DXVK/vkd3d/DXMT. Plus the "CrossOver" lineage statement: "Wine sources from CodeWeavers'
+   DXVK/vkd3d/DXMT (+ LLVM inside DXMT's winemetal.so, DXBCParser, nvapi). Plus the "CrossOver" lineage statement: "Wine sources from CodeWeavers'
    CrossOver 25.1.0 source release, LGPL 2.1".
 3. **Source offer / source archive** for every LGPL/GPL component, for that exact release:
    a tarball (or tagged git repo) with the Wine tree as built, our patches, the dependency

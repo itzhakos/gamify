@@ -1,7 +1,8 @@
 /* Minimal DXGI + D3D11 smoke test: enumerate adapters, create a device and a
  * swap chain on a window, clear it for N frames. Prints the adapter description
  * so we can tell wined3d, D3DMetal 2.1 and D3DMetal 3.0 apart.
- * Build: make -C src/d3dtest  (x86_64-w64-mingw32-gcc) */
+ * Usage: d3d11test.exe [frames=120] [sync interval=1]  (0 = no vsync, for fps comparisons)
+ * Build: make -C src/d3dtest  (x86_64-w64-mingw32-gcc); 32-bit: make -C src/d3dtest32 */
 #define COBJMACROS
 #define INITGUID
 #include <windows.h>
@@ -18,6 +19,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 int main(int argc, char **argv)
 {
     int frames = argc > 1 ? atoi(argv[1]) : 120;
+    UINT sync = argc > 2 ? atoi(argv[2]) : 1;
     WNDCLASSW wc = { 0 };
     wc.lpfnWndProc = wndproc; wc.hInstance = GetModuleHandleW(NULL); wc.lpszClassName = L"d3d11test";
     RegisterClassW(&wc);
@@ -57,11 +59,12 @@ int main(int argc, char **argv)
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); }
         float c[4] = { 0.1f, 0.4f + 0.4f * (f % 60) / 60.0f, 0.2f, 1.0f };
         ID3D11DeviceContext_ClearRenderTargetView(ctx, rtv, c);
-        hr = IDXGISwapChain_Present(sc, 1, 0);
+        hr = IDXGISwapChain_Present(sc, sync, 0);
         if (FAILED(hr)) { printf("Present failed 0x%08lx at frame %d\n", hr, f); return 3; }
     }
     DWORD dt = GetTickCount() - t0;
-    printf("presented %d frames in %lu ms (%.1f fps)\n", frames, dt, dt ? 1000.0 * frames / dt : 0.0);
+    printf("presented %d frames in %lu ms (%.1f fps, sync interval %u)\n", frames, dt,
+           dt ? 1000.0 * frames / dt : 0.0, sync);
     fflush(stdout);
     return 0;
 }
