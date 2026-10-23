@@ -209,3 +209,13 @@ install (rollback path), and downloads from github.com itself.
 
 Installs from before this feature (the first 0.1 DMG) have no updater: reinstall them once
 from a DMG built with it.
+
+## 0.7 (2026-10-23): first full-DMG update
+
+The runtime changed (rebuilt Wine with the CrossOver 26.1 hacks, nvngx names in D3DMetal,
+`runtimes/dxvk` and `runtimes/dxmt`, the `lib/wined3d` layout for both PE arches), so
+`runtime-version` went from `winecx-full-c97307d8a598` (0.4-0.6) to `winecx-full-b06c9dee8503`
+and installed copies fetch `Gamify-0.7.dmg` (575 MB) instead of the 2.3 MB app zip. Published
+with `RELEASE_NOTES` set (feature list) by `scripts/release.sh 0.7`; the Homebrew cask was
+bumped by the script. Not verified yet: an installed 0.6 updating itself to 0.7 through the DMG
+path (the app-zip path was verified for 0.1 -> 0.2).
