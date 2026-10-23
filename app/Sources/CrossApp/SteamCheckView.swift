@@ -46,9 +46,11 @@ struct SteamCheckSheet: View {
                     NSPasteboard.general.setString(check?.text ?? "", forType: .string)
                 }
                 .disabled(check == nil)
+                .help(HelpText.steamCheckCopy)
                 Spacer()
                 Button("Check Again") { model.checkSteam(bottle) }
                     .disabled(checking)
+                    .help(HelpText.steamCheckAgain)
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }

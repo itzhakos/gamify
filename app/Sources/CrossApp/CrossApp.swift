@@ -99,14 +99,18 @@ struct ContentView: View {
                             .tag(bottle.name)
                             .contextMenu {
                                 Button("Show in Finder") { model.reveal(bottle.location ?? bottle.prefix) }
+                                    .help(HelpText.sidebarShowInFinder)
                                 if bottle.location != nil, bottle.image != nil, bottle.storageError == nil {
                                     Button("Eject") { model.ejectBottle(bottle.name) }
+                                        .help(HelpText.sidebarEject)
                                 }
                                 Divider()
                                 if bottle.location != nil {
                                     Button("Remove from List…") { pendingForget = bottle.name }
+                                        .help(HelpText.sidebarRemoveFromList)
                                 }
                                 Button("Delete Bottle…", role: .destructive) { pendingDelete = bottle.name }
+                                    .help(HelpText.sidebarDelete)
                             }
                     }
                 }
@@ -123,7 +127,7 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(model.project == nil)
-                    .help("Search connected drives (or a folder) for bottles that are not in the list, e.g. on a drive from another Mac")
+                    .help(HelpText.findBottles)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                 }
@@ -137,7 +141,7 @@ struct ContentView: View {
                         Label("New Bottle", systemImage: "plus")
                     }
                     .disabled(model.runtime == nil)
-                    .help("Create a winecx bottle")
+                    .help(HelpText.newBottle)
                 }
 
             }
@@ -212,6 +216,11 @@ struct BottleRow: View {
     @EnvironmentObject var model: AppModel
     let bottle: Bottle
 
+    /// The subtitle lists runtime · backend · size · place (the other states say what is wrong).
+    private var detailedSubtitle: Bool {
+        !bottle.isUnreachable && !bottle.isEjected && bottle.storageError == nil && model.isDrivable(bottle)
+    }
+
     private var subtitle: String {
         if bottle.isUnreachable { return "\(model.locationText(bottle) ?? "drive") not connected" }
         if bottle.isEjected { return "ejected · on \(model.locationText(bottle) ?? "another drive")" }
@@ -231,6 +240,7 @@ struct BottleRow: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .help(detailedSubtitle ? HelpText.bottleRowSubtitle : "")
             }
             Spacer()
             if model.isBusy(bottle.name) {
@@ -271,6 +281,7 @@ struct NewBottleSheet: View {
         Form {
             Section {
                 TextField("Name", text: $name)
+                    .help(HelpText.newBottleName)
                 if let nameError {
                     Text(nameError).font(.caption).foregroundStyle(.red)
                 }
@@ -281,6 +292,7 @@ struct NewBottleSheet: View {
                             Text(Self.runtimeTitle(rt)).tag(rt)
                         }
                     }
+                    .help(HelpText.newBottleRuntime)
                 }
                 Picker("Graphics", selection: $graphics) {
                     Text("D3DMetal 3.0").tag(Graphics.d3dmetal)
@@ -289,6 +301,7 @@ struct NewBottleSheet: View {
                     Text("DXMT").tag(Graphics.dxmt)
                 }
                 .pickerStyle(.radioGroup)
+                .help(HelpText.newBottleGraphics)
             } header: {
                 Text("New Bottle").font(.headline)
             } footer: {
@@ -306,7 +319,9 @@ struct NewBottleSheet: View {
                             }
                         }
                         .labelsHidden()
+                        .help(HelpText.newBottleLocation)
                         Button("Choose…", action: chooseLocation)
+                            .help(HelpText.newBottleChooseLocation)
                     }
                 }
                 if let locationError {
@@ -325,6 +340,7 @@ struct NewBottleSheet: View {
                 }
                 .pickerStyle(.radioGroup)
                 .disabled(model.defaultStorageGB(at: location) == nil)
+                .help(HelpText.newBottleDisk)
                 if !ownDisk, let folderProblem {
                     Text(folderProblem).font(.caption).foregroundStyle(.red)
                 }
@@ -359,6 +375,7 @@ struct NewBottleSheet: View {
                     dismiss()
                 }
                 .disabled(!canCreate)
+                .help(HelpText.newBottleCreate)
             }
         }
     }
@@ -407,7 +424,9 @@ struct FoundBottlesBanner: View {
                 .font(.callout)
             HStack {
                 Button("Review…") { model.showingFindBottles = true }
+                    .help(HelpText.foundReview)
                 Button("Dismiss") { model.foundOnDrives = [] }
+                    .help(HelpText.foundDismiss)
             }
             .controlSize(.small)
         }

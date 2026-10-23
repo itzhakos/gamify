@@ -203,13 +203,17 @@ struct UpdateBanner: View {
             if let notes = update.manifest.notesURL {
                 Button("Release Notes") { NSWorkspace.shared.open(notes) }
                     .buttonStyle(.link)
+                    .help(HelpText.updateReleaseNotes)
             }
             Button("Later") { updates.later() }
+                .help(HelpText.updateLater)
             // no .defaultAction: the banner is not modal, a stray Return must not install
             Button("Install Now") { updates.install() }
                 .buttonStyle(.borderedProminent)
+                .help(HelpText.updateInstallNow)
         case .downloading:
             Button("Cancel") { updates.later() }
+                .help(HelpText.updateCancel)
         case .installing:
             EmptyView()
         default:
@@ -283,12 +287,16 @@ struct UpdateSettingsSection: View {
     var body: some View {
         Section("Updates") {
             Toggle("Check for updates on launch", isOn: $checkOnLaunch)
+                .help(HelpText.updatesCheckOnLaunch)
             Toggle("Install updates automatically", isOn: $autoInstall)
                 .disabled(!checkOnLaunch)
+                .help(HelpText.updatesAutoInstall)
             LabeledContent("Version", value: updates.currentVersion)
             LabeledContent("Runtime", value: updates.runtimeVersion ?? "not versioned (source checkout)")
+                .help(HelpText.updatesRuntimeVersion)
             HStack {
                 Button("Check Now") { updates.checkNow(project: model.project) }
+                    .help(HelpText.updatesCheckNow)
                 if let last = updates.lastChecked {
                     Text("Last checked \(last.formatted(date: .omitted, time: .shortened))")
                         .font(.caption).foregroundStyle(.secondary)

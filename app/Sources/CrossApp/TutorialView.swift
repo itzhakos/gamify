@@ -111,15 +111,19 @@ struct TutorialView: View {
         HStack {
             Button("Skip Tutorial") { finish() }
                 .disabled(step == lastStep)
+                .help(HelpText.tutorialSkip)
             Spacer()
             Button("Back") { step -= 1 }
                 .disabled(step == 0)
+                .help(HelpText.tutorialBack)
             if step == lastStep {
                 Button("Finish") { finish() }
                     .keyboardShortcut(.defaultAction)
+                    .help(HelpText.tutorialFinish)
             } else {
                 Button("Next") { step += 1 }
                     .keyboardShortcut(.defaultAction)
+                    .help(HelpText.tutorialNext)
             }
         }
         .padding(16)
@@ -207,6 +211,7 @@ struct TutorialView: View {
                             Label(model.rosettaInstalling ? "Installing…" : "Install Rosetta 2…", systemImage: "arrow.down.circle")
                         }
                         .disabled(model.rosettaInstalling)
+                        .help(HelpText.tutorialInstallRosetta)
                         if model.rosettaInstalling { ProgressView().controlSize(.small) }
                     }
                     Text("Prefer the Terminal? Run this command, then click Check Again:")
@@ -220,8 +225,10 @@ struct TutorialView: View {
                             NSPasteboard.general.setString(Runtime.rosettaInstallCommand, forType: .string)
                         }
                         .controlSize(.small)
+                        .help(HelpText.tutorialCopyCommand)
                         Button("Check Again") { model.recheckRosetta() }
                             .controlSize(.small)
+                            .help(HelpText.tutorialCheckRosetta)
                     }
                 }
             }
@@ -259,6 +266,7 @@ struct TutorialView: View {
                             Text("Create a new bottle").tag(Optional(BottleChoice.new))
                         }
                         .frame(maxWidth: 420)
+                        .help(HelpText.tutorialBottlePicker)
                     }
                 }
                 if choice == .new {
@@ -276,6 +284,7 @@ struct TutorialView: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 240)
                     .onSubmit(createBottle)
+                    .help(HelpText.tutorialName)
                 if let error = model.newBottleNameError(newName) {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
@@ -298,6 +307,7 @@ struct TutorialView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Button("Create Bottle", action: createBottle)
                 .disabled(newName.isEmpty || model.newBottleNameError(newName) != nil)
+                .help(HelpText.tutorialCreateBottle)
         }
     }
 
@@ -365,6 +375,7 @@ struct TutorialView: View {
                 Label("Install Steam", systemImage: "arrow.down.circle")
             }
             .disabled(winebootRunning)
+            .help(HelpText.tutorialInstallSteam)
         }
     }
 
@@ -403,6 +414,7 @@ struct TutorialView: View {
                 } label: {
                     Label("Launch Steam", systemImage: "gamecontroller")
                 }
+                .help(HelpText.tutorialLaunchSteam)
             }
         }
     }
@@ -448,6 +460,7 @@ struct TutorialView: View {
                 Text("Settings (⌘,) shows every folder Gamify uses and the exact environment a bottle runs with. Its General tab replays this tutorial, and Help > Gamify Tutorial brings it back too.")
                     .font(.callout)
                 SettingsLink { Label("Open Settings", systemImage: "gearshape") }
+                    .help(HelpText.tutorialOpenSettings)
             }
             Text("That is all. Click Finish, then pick a bottle in the main window and launch something.")
                 .fontWeight(.medium)
@@ -466,7 +479,7 @@ struct TutorialView: View {
                     if let url {
                         Button { model.reveal(url) } label: { Image(systemName: "arrow.right.circle") }
                             .buttonStyle(.borderless)
-                            .help("Show in Finder")
+                            .help(HelpText.showInFinder)
                     }
                 }
                 Text(detail).font(.callout).foregroundStyle(.secondary)

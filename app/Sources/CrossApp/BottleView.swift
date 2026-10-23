@@ -129,13 +129,14 @@ struct BottleView: View {
                         Text(work).foregroundStyle(.secondary)
                     } else if bottle.isEjected && !bottle.isUnreachable {
                         Button("Mount") { model.mountBottle(bottle.name) }
-                            .help("Mounts the bottle's disk image again")
+                            .help(HelpText.mount)
                     } else {
                         Button("Try Again") { model.reloadBottles() }
+                            .help(HelpText.tryAgain)
                     }
                     if bottle.location != nil {
                         Button("Remove from List") { model.forgetBottle(bottle.name) }
-                            .help("Takes the bottle off the list; its files stay where they are (Find Bottles adds it again)")
+                            .help(HelpText.removeFromList)
                     }
                 }
             }
@@ -155,17 +156,21 @@ struct BottleView: View {
                 Text(work).foregroundStyle(.secondary)
             } else if bottle.isImageBacked {
                 if let usage = model.storageUsage[bottle.name] ?? bottle.storageUsage {
-                    Text("Disk")
-                    ProgressView(value: usage.fraction)
-                        .tint(usage.fraction > 0.9 ? .red : (usage.fraction > 0.75 ? .orange : .accentColor))
-                        .frame(width: 160)
-                    Text("\(formatGB(usage.used)) of \(formatGB(usage.total)) used, \(formatGB(usage.available)) free")
-                        .foregroundStyle(.secondary)
+                    Group {
+                        Text("Disk")
+                        ProgressView(value: usage.fraction)
+                            .tint(usage.fraction > 0.9 ? .red : (usage.fraction > 0.75 ? .orange : .accentColor))
+                            .frame(width: 160)
+                        Text("\(formatGB(usage.used)) of \(formatGB(usage.total)) used, \(formatGB(usage.available)) free")
+                            .foregroundStyle(.secondary)
+                    }
+                    .help(HelpText.diskUsage)
                 } else {
                     Text("Disk image not mounted").foregroundStyle(.secondary)
                 }
             } else {
                 Text("Folder, no size limit")
+                    .help(HelpText.diskFolder)
                 if let free = model.hostFree[bottle.name], free > 0 {
                     Text("· \(formatGB(free)) free").foregroundStyle(.secondary).lineLimit(1)
                 }
@@ -176,29 +181,30 @@ struct BottleView: View {
                     .foregroundStyle(.secondary)
                 Text(model.locationText(bottle).map { "on \($0)" } ?? "in the bottles folder")
                     .foregroundStyle(.secondary)
-                    .help(bottle.location?.path ?? model.project?.bottles.path ?? "")
+                    .help(HelpText.diskLocation(bottle.location?.path ?? model.project?.bottles.path ?? ""))
             }
             Spacer()
             Menu("Move to…") {
                 Button("Choose a Folder…", action: chooseMoveTarget)
+                    .help(HelpText.moveChooseFolder)
                 Button("The Bottles Folder") { model.moveBottle(bottle.name, to: nil) }
                     .disabled(bottle.location == nil)
+                    .help(HelpText.moveBottlesFolder)
                 if bottle.location != nil && bottle.isImageBacked {
                     Divider()
                     Button("Eject") { model.ejectBottle(bottle.name) }
+                        .help(HelpText.moveEject)
                 }
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
             .controlSize(.small)
             .disabled(model.storageWork[bottle.name] != nil)
-            .help("Copy this bottle to another folder or drive (it is checked before the original is removed), or back to the bottles folder. Programs in it must be closed.")
+            .help(HelpText.moveMenu)
             Button(bottle.isImageBacked ? "Change…" : "Move to a Disk Image…") { showingStorage = true }
                 .controlSize(.small)
                 .disabled(model.storageWork[bottle.name] != nil)
-                .help(bottle.isImageBacked
-                      ? "Resize this bottle's disk (programs in it must be closed)"
-                      : "Copy this bottle into its own disk image of a size you choose")
+                .help(bottle.isImageBacked ? HelpText.changeSize : HelpText.moveToImage)
         }
         .font(.callout)
         .padding(.horizontal, 6)
@@ -260,14 +266,17 @@ struct BottleView: View {
         let installed = Steam.isInstalled(in: bottle)
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
-                Circle().fill(installed ? steamStatusColor : .clear)
-                    .overlay(Circle().stroke(Color.secondary.opacity(installed ? 0 : 0.6)))
-                    .frame(width: 8, height: 8)
-                Text("Steam").fontWeight(.medium)
-                Text(installed || model.steamSetup.contains(bottle.name)
-                     ? String(steamStatusText.dropFirst("Steam: ".count)) : "not installed")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                Group {
+                    Circle().fill(installed ? steamStatusColor : .clear)
+                        .overlay(Circle().stroke(Color.secondary.opacity(installed ? 0 : 0.6)))
+                        .frame(width: 8, height: 8)
+                    Text("Steam").fontWeight(.medium)
+                    Text(installed || model.steamSetup.contains(bottle.name)
+                         ? String(steamStatusText.dropFirst("Steam: ".count)) : "not installed")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .help(HelpText.steamStatus)
                 Spacer()
                 steamButtons
             }
@@ -276,6 +285,7 @@ struct BottleView: View {
                     Text(reason).foregroundStyle(.secondary)
                     Button("Restart Steam") { model.restartSteam(bottle.name) }
                         .controlSize(.small)
+                        .help(HelpText.restartSteam)
                 }
                 .padding(.leading, 16)
             }
@@ -290,29 +300,29 @@ struct BottleView: View {
                 Label("Setting up…", systemImage: "hourglass")
             }
             .disabled(true)
-            .help("First start: Steam downloads its client, then restarts with the webhelper shim (see the steam-bootstrap log)")
+            .help(HelpText.steamSettingUp)
         } else if model.steamRestarting.contains(bottle.name) {
             Button {} label: {
                 Label("Restarting…", systemImage: "hourglass")
             }
             .disabled(true)
-            .help("Steam is asked to quit, the bottle is cleared, then Steam starts again (see the job list)")
+            .help(HelpText.steamRestarting)
         } else if Steam.isInstalled(in: bottle) {
             Button("Launch") {
                 model.launchSteam(bottle.name)
             }
-            .help("Launch Steam: installs the webhelper shim, resets ActiveProcess and clears stale locks (only when Steam is not running), runs steam.exe \(Runtime.steamFlags.joined(separator: " ")) (the first start downloads the client and restarts Steam once). A stuck Steam is detected first and offered a restart.")
+            .help(HelpText.launchSteam)
             Button {
                 model.restartSteam(bottle.name)
             } label: {
                 Image(systemName: "arrow.clockwise")
             }
-            .help("Restart Steam: steam.exe -shutdown, wait up to 20 s, wineserver -k to be sure, then Launch Steam. The way out of a Steam that lost its connection or stopped responding.")
+            .help(HelpText.restartSteam)
             Button("Check…") {
                 model.checkSteam(bottle.name)
                 showingSteamCheck = true
             }
-            .help("Check Steam: is it running and signed in, does a game here get its licences from Steam (a test program asks Steam, as Spacewar), and which licence each installed game has (owned, Friend's Pass, free weekend, ...)")
+            .help(HelpText.checkSteam)
             .sheet(isPresented: $showingSteamCheck) {
                 SteamCheckSheet(bottle: bottle.name)
             }
@@ -320,7 +330,7 @@ struct BottleView: View {
             Button("Install Steam") {
                 model.installSteam(bottle.name)
             }
-            .help("Runs SteamSetup.exe /S (downloads it into downloads/steam/ if missing), then starts Steam once to download its client")
+            .help(HelpText.installSteam)
         }
     }
 
@@ -329,26 +339,29 @@ struct BottleView: View {
         let running = model.storesRunning[bottle.name]?.contains(store.id) == true
         let installing = model.isInstallingStore(store, in: bottle.name)
         return HStack(spacing: 8) {
-            Circle().fill(running ? Color.green : (installed ? Color.secondary : .clear))
-                .overlay(Circle().stroke(Color.secondary.opacity(installed || running ? 0 : 0.6)))
-                .frame(width: 8, height: 8)
-            Text(store.name).fontWeight(.medium)
-            Text(installing ? "installing…" : (running ? "running" : (installed ? "installed" : "not installed")))
-                .foregroundStyle(.secondary)
+            Group {
+                Circle().fill(running ? Color.green : (installed ? Color.secondary : .clear))
+                    .overlay(Circle().stroke(Color.secondary.opacity(installed || running ? 0 : 0.6)))
+                    .frame(width: 8, height: 8)
+                Text(store.name).fontWeight(.medium)
+                Text(installing ? "installing…" : (running ? "running" : (installed ? "installed" : "not installed")))
+                    .foregroundStyle(.secondary)
+            }
+            .help(HelpText.storeStatus(store.name))
             if let issue = store.knownIssue {
                 Image(systemName: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
-                    .help("Known issue: \(issue)")
+                    .help(HelpText.storeKnownIssue(issue))
             }
             Spacer()
             if installing {
                 ProgressView().controlSize(.small)
             } else if installed {
                 Button("Launch") { model.launchStore(store, in: bottle.name) }
-                    .help("Starts \(store.name) (\(store.executable(in: bottle)?.lastPathComponent ?? "")\(store.launchArguments.isEmpty ? "" : " " + store.launchArguments.joined(separator: " "))). \(store.notes)")
+                    .help(HelpText.storeLaunch(store.name))
             } else {
                 Button("Install…") { storeToInstall = store }
-                    .help("Downloads \(store.name)'s official installer into downloads/\(store.id)/ and installs it here. \(store.notes)")
+                    .help(HelpText.storeInstall(store.name))
             }
         }
         .font(.callout)
@@ -396,13 +409,14 @@ struct BottleView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 320)
-                .help("DirectX backend, applies to programs started afterwards. D3DMetal: DX11/12, 64-bit. wined3d: Wine's own. DXVK: DX9/10/11, 32- and 64-bit, over MoltenVK (winecx-full bottles). DXMT: DX10/11, 32- and 64-bit, on Metal.")
+                .help(HelpText.graphicsPicker)
             }
             Button {
                 model.reveal(bottle.driveC)
             } label: {
                 Label("Show C:", systemImage: "folder")
             }
+            .help(HelpText.showC)
         }
     }
 
@@ -416,25 +430,32 @@ struct BottleView: View {
                         Label("Run .exe…", systemImage: "play.fill")
                     }
                     .keyboardShortcut("o")
+                    .help(HelpText.runExe)
                     TextField("arguments (optional)", text: $exeArguments)
                         .frame(maxWidth: 220)
+                        .help(HelpText.exeArguments)
                     Spacer()
                     Button(role: .destructive) {
                         model.killBottle(bottle.name)
                     } label: {
                         Label("Kill Bottle", systemImage: "xmark.octagon")
                     }
-                    .help("wineserver -k: ends every Windows process in this bottle")
+                    .help(HelpText.killBottle)
                 }
                 HStack {
                     Button("Wine Configuration") { model.winecfg(bottle.name) }
+                        .help(HelpText.wineConfiguration)
                     Button("Command Prompt") { model.commandPrompt(bottle.name) }
+                        .help(HelpText.commandPrompt)
                     Button("Explorer") { model.explorer(bottle.name) }
+                        .help(HelpText.explorer)
                     Divider().frame(height: 20)
                     TextField("cmd /c …  e.g. ver", text: $commandLine)
                         .onSubmit(runCommandLine)
+                        .help(HelpText.commandLine)
                     Button("Run", action: runCommandLine)
                         .disabled(commandLine.isEmpty)
+                        .help(HelpText.runCommand)
                 }
             }
             .padding(4)
@@ -455,6 +476,7 @@ struct BottleView: View {
                             JobRow(job: job, selected: job.id == shownJob?.id)
                                 .contentShape(Rectangle())
                                 .onTapGesture { selectedJob = job.id }
+                                .help(HelpText.jobRow)
                         }
                     }
                 }
@@ -517,14 +539,12 @@ struct PerformanceBox: View {
                     }
                     .pickerStyle(.segmented)
                     .fixedSize()
-                    .help("How Windows sync objects are implemented: ESync (WINEESYNC=1, the default) or MSync (WINEMSYNC=1, Mach semaphores; some games run better with it). Change it only while nothing runs in this bottle.")
+                    .help(HelpText.perfSync)
                     Toggle("DLSS via MetalFX", isOn: setting(\.metalfx))
                         .disabled(!d3dmetal)
-                        .help(d3dmetal
-                              ? "Games that offer DLSS get MetalFX upscaling and frame generation (frame generation needs macOS 26 and a DLSS 3 game). The GPU is reported as NVIDIA (D3DM_VENDOR_ID=0x10DE), nvngx.dll and nvapi64.dll are put in system32. Turn DLSS on in the game's settings."
-                              : "DLSS via MetalFX needs the D3DMetal graphics backend")
+                        .help(d3dmetal ? HelpText.perfMetalFX : HelpText.perfMetalFXDisabled)
                     Toggle("Advertise AVX", isOn: setting(\.avx))
-                        .help("ROSETTA_ADVERTISE_AVX=1: Rosetta reports AVX/AVX2 to games. Some newer games refuse to start without it; leave it off otherwise.")
+                        .help(HelpText.perfAVX)
                     Picker("Ray tracing", selection: raytracing) {
                         Text("Default").tag(0)
                         Text("On").tag(1)
@@ -532,7 +552,7 @@ struct PerformanceBox: View {
                     }
                     .fixedSize()
                     .disabled(!d3dmetal)
-                    .help("DirectX ray tracing in D3DMetal (D3DM_SUPPORT_DXR). Default: on for M3 and later. Off can make DX12 games that turn ray tracing on by themselves faster and steadier.")
+                    .help(HelpText.perfRayTracing)
                     Spacer(minLength: 0)
                 }
                 HStack(spacing: 16) {
@@ -544,11 +564,11 @@ struct PerformanceBox: View {
                     }
                     .fixedSize()
                     .disabled(!d3dmetal)
-                    .help("Frame cap inside D3DMetal (D3DM_MAX_FPS); empty for none. Cooler and steadier, pairs well with frame generation.")
+                    .help(HelpText.perfFPSCap)
                     Toggle("Metal HUD", isOn: setting(\.hud))
-                        .help("MTL_HUD_ENABLED=1: Apple's Metal performance HUD (frame rate, GPU time; shows MetalFX when DLSS is bridged)")
+                        .help(HelpText.perfHUD)
                     Toggle("Retina (High Resolution)", isOn: setting(\.retina))
-                        .help("Off: Windows renders at half the Retina resolution and macOS scales it up (faster). On: native pixels, sharper, about four times the pixels to render. Change it only while nothing runs in this bottle.")
+                        .help(HelpText.perfRetina)
                     Spacer(minLength: 0)
                 }
                 Text("Applies to programs started afterwards; change Sync and Retina only while nothing runs in this bottle.")
@@ -584,6 +604,7 @@ struct StorageSizeField: View {
                 Stepper("Size", value: $sizeGB, in: range)
                     .labelsHidden()
             }
+            .help(HelpText.storageSize)
         }
     }
 }
@@ -624,6 +645,7 @@ struct StorageSheet: View {
                         model.setStorage(nil, for: bottle.name)
                         dismiss()
                     }
+                    .help(HelpText.storageToFolder)
                 } footer: {
                     Text("Copies the bottle out of its disk image into a plain folder, then deletes the image.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -646,6 +668,7 @@ struct StorageSheet: View {
                     dismiss()
                 }
                 .disabled(!valid)
+                .help(bottle.isImageBacked ? HelpText.storageResize : HelpText.storageMove)
             }
         }
     }
@@ -668,7 +691,7 @@ struct JobRow: View {
             if job.isRunning {
                 Button("Stop") { model.stop(job) }
                     .controlSize(.small)
-                    .help("SIGTERM to this process (Kill Bottle ends everything)")
+                    .help(HelpText.jobStop)
             }
             Button {
                 model.reveal(job.logURL)
@@ -676,7 +699,7 @@ struct JobRow: View {
                 Image(systemName: "doc.text.magnifyingglass")
             }
             .buttonStyle(.borderless)
-            .help("Show the log file")
+            .help(HelpText.jobLog)
         }
         .font(.callout)
         .padding(.horizontal, 6)

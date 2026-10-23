@@ -27,8 +27,10 @@ struct GeneralTab: View {
                 LabeledContent("Status", value: tutorialShown ? "shown" : "opens on the next launch")
                 HStack {
                     Button("Show Tutorial Again") { openWindow(id: TutorialView.windowID) }
+                        .help(HelpText.tutorialShowAgain)
                     Button("Show on Next Launch") { tutorialShown = false }
                         .disabled(!tutorialShown)
+                        .help(HelpText.tutorialShowOnNextLaunch)
                 }
                 Text("The tutorial walks through bottles, Steam and running games. It opens on the first launch (user default `\(AppModel.tutorialShownKey)`; `CROSS_RESET_TUTORIAL=1` in the environment resets it).")
                     .font(.caption).foregroundStyle(.secondary)
@@ -59,13 +61,17 @@ struct EnvironmentTab: View {
                     ForEach(drivable, id: \.name) { Text($0.name).tag(Optional($0.name)) }
                 }
                 .frame(maxWidth: 240)
+                .help(HelpText.envBottle)
                 Toggle("only variables Gamify sets", isOn: $onlyCross)
+                    .help(HelpText.envOnlyGamify)
                 Toggle("export format (--export)", isOn: $export)
+                    .help(HelpText.envExport)
                 Spacer()
                 Button("Copy") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
                 }
+                .help(HelpText.envCopy)
             }
             ScrollView([.vertical, .horizontal]) {
                 Text(text)
@@ -117,27 +123,31 @@ struct PathsTab: View {
                             model.locateProject()
                         }
                     }
+                    .help(HelpText.pathsChooseBottles)
                     Button("Reset to Default") {
                         bottlesOverride = ""
                         model.locateProject()
                     }
                     .disabled(bottlesOverride.isEmpty)
+                    .help(HelpText.pathsResetBottles)
                 }
                 Text("Where new bottles go and where the bottle list is read from (user default `\(AppModel.bottlesOverrideKey)`, passed on as CROSS_BOTTLES). Bottles in the old folder are not listed while another folder is set: reset the setting, or move them first (bottle page > Move to…). To keep a single bottle somewhere else, e.g. on an external drive, choose its location in New Bottle or use Move to… instead; it stays in the list. Folder bottles need an APFS or Mac OS Extended drive; on exFAT the bottles folder can hold disk-image bottles only.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Runtime") {
                 LabeledContent("Available", value: model.availableRuntimes.isEmpty ? "none" : model.availableRuntimes.joined(separator: ", "))
+                    .help(HelpText.pathsRuntimes)
                 ForEach(model.availableRuntimes, id: \.self) { rt in
                     pathRow(rt, model.project.map { Runtime(project: $0, name: rt).home })
                 }
-                pathRow("D3DMetal", model.runtime?.d3dmetalHome)
-                pathRow("wined3d", model.runtime?.wined3dDir)
-                pathRow("DXVK", model.runtime?.dxvkHome)
-                pathRow("DXMT", model.runtime?.dxmtHome)
-                pathRow("Webhelper shim", model.project?.webhelperShim)
+                pathRow("D3DMetal", model.runtime?.d3dmetalHome, help: HelpText.pathD3DMetal)
+                pathRow("wined3d", model.runtime?.wined3dDir, help: HelpText.pathWined3d)
+                pathRow("DXVK", model.runtime?.dxvkHome, help: HelpText.pathDXVK)
+                pathRow("DXMT", model.runtime?.dxmtHome, help: HelpText.pathDXMT)
+                pathRow("Webhelper shim", model.project?.webhelperShim, help: HelpText.pathWebhelper)
                 pathRow("Third-party notices", model.project?.notices)
                 LabeledContent("Rosetta 2", value: model.rosettaInstalled ? "installed" : "missing")
+                    .help(HelpText.pathsRosetta)
             }
             Section(bundled ? "App" : "Checkout") {
                 pathRow(bundled ? "Runtime files" : "Gamify root", model.project?.root)
@@ -147,13 +157,16 @@ struct PathsTab: View {
                 if !bundled {
                     HStack {
                         TextField("Root override (empty = find it from the app's location)", text: $rootOverride)
+                            .help(HelpText.pathsRootOverride)
                         Button("Choose…") {
                             let panel = NSOpenPanel()
                             panel.canChooseDirectories = true
                             panel.canChooseFiles = false
                             if panel.runModal() == .OK, let url = panel.url { rootOverride = url.path }
                         }
+                        .help(HelpText.pathsRootOverride)
                         Button("Apply") { model.locateProject() }
+                            .help(HelpText.pathsRootOverride)
                     }
                 }
             }
@@ -161,7 +174,8 @@ struct PathsTab: View {
         .formStyle(.grouped)
     }
 
-    private func pathRow(_ title: String, _ url: URL?) -> some View {
+    /// `help`: what the row is (the reveal arrow has its own "Show in Finder").
+    private func pathRow(_ title: String, _ url: URL?, help: String? = nil) -> some View {
         LabeledContent(title) {
             HStack {
                 Text(url?.path ?? "-").textSelection(.enabled).lineLimit(1).truncationMode(.middle)
@@ -171,8 +185,10 @@ struct PathsTab: View {
                         .foregroundStyle(exists ? .green : .orange)
                     Button { model.reveal(url) } label: { Image(systemName: "arrow.right.circle") }
                         .buttonStyle(.borderless)
+                        .help(HelpText.showInFinder)
                 }
             }
         }
+        .help(help ?? "")
     }
 }

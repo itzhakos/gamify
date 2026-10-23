@@ -95,6 +95,7 @@ app/Sources/CrossApp/
   TutorialView.swift  first-run tutorial window (six steps, see below)
   Updates.swift    UpdateController (launch check, Check for Updates…), the update banner,
                    Settings > General > Updates (docs/updates.md)
+  HelpText.swift   every hover help (`.help`) text, by view (see "Hover help")
 ```
 
 ### CLI refactor check
@@ -1077,3 +1078,239 @@ changed with the same `mv`; `scripts/winecx-env.sh` mirrors the layout.
 `cross bottle create bk2 --runtime winecx --graphics dxvk` is refused with the MoltenVK message.
 The app builds; its picker and New Bottle sheet list all four. Not tested: real games on
 DXVK/DXMT (a clear-only test cannot rank the backends; all sit at the display's refresh cap).
+
+## Hover help (2026-10-23)
+
+Tooltips are SwiftUI `.help` modifiers; every text lives in `app/Sources/CrossApp/HelpText.swift` (`enum HelpText`,
+one constant or function per text, grouped by view as below). *Italics* stand for a value filled in at run time.
+
+### BottleView.swift: header
+
+| Control | Help text |
+|---|---|
+| Graphics picker | Which translation layer draws the game. D3DMetal (default) handles DirectX 11 and 12 games. wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). Applies to programs started afterwards; for Steam games, restart Steam. |
+| Show C: | Opens this bottle's C: drive in Finder, where its programs and save files live. |
+
+### BottleView.swift: actions box
+
+| Control | Help text |
+|---|---|
+| Run .exe… | Picks a Windows program or installer and runs it in this bottle (⌘O). A game bought on Steam starts through Steam. |
+| arguments field | Extra command-line options for the program you run with Run .exe…, for example -windowed. Leave it empty unless a game's guide tells you to add one. |
+| Kill Bottle | Force-quits every Windows program in this bottle, including Steam. The way out of a stuck game. Unsaved progress is lost. |
+| Wine Configuration | Opens Wine's settings for this bottle: the Windows version it pretends to be, drives and per-program overrides. Rarely needed. |
+| Command Prompt | Opens a Windows command window inside this bottle, for typing commands as you would on a PC. |
+| Explorer | Opens a Windows-style file browser for this bottle's drives. |
+| cmd /c field | One Windows command to run in this bottle, for example ver or ipconfig. Its output appears in the log below. |
+| Run (command) | Runs the command on the left in this bottle; the output appears in the log below. |
+
+### BottleView.swift: disk row
+
+| Control | Help text |
+|---|---|
+| Disk bar and "x of y used" text (image bottle) | How much of this bottle's own disk is in use. Windows sees C: as a drive of this size; Change… resizes it. |
+| "Folder, no size limit" text (folder bottle) | This bottle is a plain folder on the Mac's disk and grows as needed. Move to a Disk Image… gives it a fixed size instead. |
+| "on X" / "in the bottles folder" text | Where this bottle's files are kept:<br>*the folder's path* |
+| Move to… menu | Moves this bottle to another folder or drive, e.g. an external SSD, or back to the bottles folder. It is copied and checked before the original is removed, so nothing is lost. Close its programs first. |
+| Move to… > Choose a Folder… | Picks the folder or drive to move this bottle to. It then runs from there while the drive is connected. |
+| Move to… > The Bottles Folder | Moves the bottle back to Gamify's bottles folder on this Mac. |
+| Move to… > Eject | Unmounts this bottle's disk image so the drive can be ejected safely. Click Mount on the bottle's page to use it again. |
+| Change… (image bottle) | Changes how much space this bottle may take. Windows sees C: as a drive of that size. Close its programs first. |
+| Move to a Disk Image… (folder bottle) | Puts this bottle into its own disk image with a size limit you choose, like a virtual drive. The image only takes the space actually used. |
+
+### BottleView.swift: unavailable box
+
+| Control | Help text |
+|---|---|
+| Mount | Mounts this bottle's disk image again so it can be used. |
+| Try Again | Checks again whether the bottle's drive or disk image is available now. |
+| Remove from List | Takes the bottle off the list. Its files stay on the drive; Find Bottles… can add it back later. |
+
+### BottleView.swift: stores box
+
+| Control | Help text |
+|---|---|
+| Steam status (dot, "Steam", status text) | Whether Steam is installed in this bottle, running and signed in. Checked every few seconds. |
+| Install Steam | Downloads Steam's official installer (once) and installs Steam in this bottle. Steam then starts once to download its client, about 1.7 GB; a black window during that is normal. |
+| Setting up… | Steam is downloading its client and will restart once by itself. This takes a few minutes; the log below shows the progress. |
+| Restarting… | Steam is being closed and started again. Takes up to half a minute. |
+| Launch (Steam) | Starts Steam in this bottle. If Steam is already running but stuck, Gamify offers to restart it first. |
+| ↻ Restart, and Restart Steam on the stuck row | Quits Steam and starts it again cleanly. Use it when Steam shows "No connection", hangs, or a game will not start. Also needed after changing Graphics or Performance settings, so Steam games pick them up. Nothing is lost. |
+| Check… | Asks Steam whether it is signed in and whether your games get their licences from it, and lists each installed game's licence (bought, Friend's Pass, free weekend…). Use it when a game runs as a demo or trial. |
+| Other store status (dot, name, status text) | Whether *store* is installed in this bottle and running right now. |
+| Known issue ⚠ icon | Known issue: *the store's known issue* |
+| Launch (other store) | Starts *store* in this bottle. On its first start a store may update itself and restart once. |
+| Install… (other store) | Downloads *store*'s official installer (once, kept in Gamify's Downloads folder) and installs it in this bottle. You are asked first. |
+
+### BottleView.swift: processes box (JobRow)
+
+| Control | Help text |
+|---|---|
+| A row in the list | Click to show this program's log below. |
+| Stop | Asks this program to quit. If it does not, Kill Bottle ends everything in the bottle. |
+| Log icon | Shows this program's log file in Finder. Attach it when asking for help. |
+
+### BottleView.swift: performance box
+
+| Control | Help text |
+|---|---|
+| Sync picker | How Windows programs wait for each other. ESync works everywhere; MSync is sometimes faster in games. Switch only if a game stutters, and only while nothing runs in this bottle. |
+| DLSS via MetalFX (D3DMetal bottle) | Games that offer DLSS in their settings get Apple's MetalFX upscaling instead, and frame generation on macOS 26 or newer. Leave it on unless a game shows a graphics-driver warning. For Steam games, restart Steam after changing it. |
+| DLSS via MetalFX (disabled, other backend) | DLSS via MetalFX needs the D3DMetal graphics backend. Pick D3DMetal above to use it. |
+| Advertise AVX | Tells games this Mac supports AVX, a set of CPU instructions some newer games require. Turn it on only if a game refuses to start with a message about AVX or an unsupported CPU. |
+| Ray tracing picker | Lets DirectX 12 games use ray tracing (realistic lighting and reflections) through D3DMetal. Default: on with an M3 chip or newer. Set it Off when a game turns ray tracing on by itself and runs slowly. |
+| FPS cap | Limits the frame rate, for example 60. Steadier, cooler and quieter, and a good match for frame generation. Leave it empty for no limit. |
+| Metal HUD | Shows Apple's performance overlay in the game window: frame rate, GPU time and whether MetalFX is active. Useful while tuning, off for playing. |
+| Retina (High Resolution) | Renders at the display's full resolution. Sharper, but roughly four times the pixels, so lower frame rates. Off scales a half-resolution image up, which is what most games want. Change it only while nothing runs in this bottle. |
+
+### BottleView.swift: StorageSizeField (New Bottle and StorageSheet)
+
+| Control | Help text |
+|---|---|
+| Size slider, field and stepper | The size Windows sees for this bottle's C: drive, in GB. The disk image only takes the space actually used, so a generous size costs nothing until it is filled. |
+
+### BottleView.swift: StorageSheet
+
+| Control | Help text |
+|---|---|
+| Resize | Applies the new size. Takes a few seconds; programs in the bottle must be closed. |
+| Move | Copies the bottle into a new disk image of this size and removes the folder once the copy is verified. |
+| Move to a Folder (no size limit) | Turns the bottle back into a plain folder that can grow as large as the Mac's disk allows. Folder bottles cannot live on exFAT drives. |
+
+### CrossApp.swift: ContentView
+
+| Control | Help text |
+|---|---|
+| New Bottle (+) toolbar button | Creates a new bottle: a separate Windows installation with its own C: drive, settings and programs. |
+| Find Bottles… | Searches connected drives, or a folder you choose, for bottles that are not in the list, e.g. one made on another Mac. |
+| Sidebar menu: Show in Finder | Opens the bottle's folder in Finder. |
+| Sidebar menu: Eject | Unmounts this bottle's disk image so its drive can be ejected safely. Click Mount on the bottle's page to use it again. |
+| Sidebar menu: Remove from List… | Takes the bottle off the list but keeps its files. Find Bottles… adds it back. |
+| Sidebar menu: Delete Bottle… | Deletes the bottle with everything installed in it. Cannot be undone. |
+
+### CrossApp.swift: BottleRow
+
+| Control | Help text |
+|---|---|
+| Subtitle (usable bottle; none for a missing, ejected or broken one) | Wine build · graphics backend · size of its own disk · where it is kept. |
+
+### CrossApp.swift: FoundBottlesBanner
+
+| Control | Help text |
+|---|---|
+| Review… | Shows the bottles found on the drive so you can add them to the list. |
+| Dismiss | Hides this notice. Find Bottles… below finds them again later. |
+
+### CrossApp.swift: NewBottleSheet
+
+| Control | Help text |
+|---|---|
+| Name field | The bottle's name, also the name of its folder. Cannot start with a dot or contain a slash. |
+| Runtime picker (more than one runtime) | Which Wine build the bottle uses. winecx-full adds video playback, SDL2 and Vulkan support (needed for DXVK); winecx is the plain build. Cannot be changed later. |
+| Graphics | Which translation layer draws the game. D3DMetal (default) handles DirectX 11 and 12 games. wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). You can change this later on the bottle page. |
+| Location picker | Where the bottle's files are kept: Gamify's bottles folder on this Mac, or a folder you choose, e.g. on an external drive. |
+| Choose… (location) | Picks a folder, e.g. on an external SSD, to keep the bottle there. It runs from there while the drive is connected. |
+| Disk | Its own disk: a virtual disk of a fixed size, so the bottle can never take more; the image only takes the space actually used. Unlimited: a plain folder that grows as needed (not possible on exFAT drives). |
+| Create | Creates the bottle and sets up its C: drive (about 40 seconds). |
+
+### SettingsView.swift: GeneralTab
+
+| Control | Help text |
+|---|---|
+| Show Tutorial Again | Opens the first-run introduction again (bottles, Steam, running games). |
+| Show on Next Launch | Makes the tutorial open again the next time Gamify starts. |
+
+### Updates.swift: UpdateSettingsSection (Settings > General > Updates)
+
+| Control | Help text |
+|---|---|
+| Check for updates on launch | Looks for a new Gamify version each time the app starts. Only a small version file is fetched; nothing about you or your Mac is sent. |
+| Install updates automatically | Downloads and installs a new version by itself when one is found, then restarts Gamify. An update that replaces the Wine runtime is skipped while a game or Steam is running; quit them and check again. |
+| Check Now | Looks for a new version right now. |
+| Runtime | The version of the Wine runtime bundled with Gamify. "not versioned" means Gamify runs from a source checkout. |
+
+### SettingsView.swift: EnvironmentTab
+
+| Control | Help text |
+|---|---|
+| Bottle picker | The bottle whose environment to show. |
+| only variables Gamify sets | Shows only the settings Gamify adds for this bottle, not everything the Mac passes on to programs. |
+| export format (--export) | Formats the list so it can be pasted into Terminal to run the bottle by hand (each line starts with export). |
+| Copy | Copies the list to the clipboard, e.g. to attach to a bug report. |
+
+### SettingsView.swift: PathsTab
+
+| Control | Help text |
+|---|---|
+| Reveal arrow in every path row | Show in Finder |
+| Bottles folder > Choose… | Picks a different folder for all bottles, e.g. on a bigger drive. Bottles in the old folder are not listed until you move them there or reset this. |
+| Reset to Default | Goes back to Gamify's standard bottles folder. |
+| Available (runtimes) | The Wine builds that come with Gamify. Each bottle uses one of them. |
+| D3DMetal row | Apple's layer that turns DirectX 11 and 12 into Metal; the default graphics backend. |
+| wined3d row | Wine's own DirectX renderer, the fallback graphics backend. |
+| DXVK row | Graphics backend for DirectX 9/10/11 over Vulkan; an alternative when a game misbehaves on D3DMetal. |
+| DXMT row | Graphics backend for DirectX 10/11 directly on Metal; an alternative when a game misbehaves on D3DMetal. |
+| Webhelper shim row | A small helper that lets Steam's store and library pages render under Wine. |
+| Rosetta 2 | Apple's translator that runs Intel programs on Apple Silicon. Windows games need it. |
+| Root override field, its Choose… and Apply (source checkout only) | For developers: where the Gamify source checkout is. Leave it empty. |
+
+### ProgramsView.swift
+
+| Control | Help text |
+|---|---|
+| Install a Program… | Runs a Windows installer (.exe or .msi) in this bottle, as on a PC. The programs it installs appear in this list afterwards. |
+| Add a Program… | Adds a program that is already inside this bottle's C: drive to this list, so you can launch it from here. |
+| Program path caption | *the program's exe*, plus a line "Shortcut: *the .lnk*" for a program from a shortcut |
+| Launch | Runs this program in the bottle. A Steam game starts through Steam, so Steam counts the licence and playtime. |
+| … menu | More options. Clear Shader Cache… deletes the graphics shaders compiled for this program; try it when a game stops starting or shows glitches after an update. |
+| Clear Shader Cache (size)… / No Shader Cache Yet | Deletes the shaders D3DMetal compiled for this program. The next start compiles them again (a slower first start, some stutter). Apple recommends this when a game no longer starts after an update. |
+| Remove (minus), program from a shortcut | Remove from this list (the shortcut and the program stay in the bottle) |
+| Remove (minus), program added by hand | Remove from this list (the program stays in the bottle) |
+| Add sheet: Name field | The name shown in the Programs list. |
+| Add sheet: Arguments field | Extra command-line options passed to the program every time it is launched from here. Usually empty. |
+| Add sheet: Add | Adds the program to the list. |
+
+### SteamCheckView.swift
+
+| Control | Help text |
+|---|---|
+| Copy Report | Copies the whole report as text, to paste into a message when asking for help. |
+| Check Again | Runs the check again, e.g. after signing in to Steam. |
+
+### FindBottlesView.swift
+
+| Control | Help text |
+|---|---|
+| Search Drives Again | Searches every connected drive again, e.g. after plugging one in. |
+| Search a Folder… | Searches one folder you choose, e.g. a network share or a specific place on a drive. |
+| Name field (per found bottle) | The name the bottle gets in the list. Change it if the name is already taken. |
+| Add | Why the name cannot be used (e.g. "A bottle with this name exists"), otherwise: Adds this bottle to the list. It stays where it is and runs from there. |
+| "listed as 'x'" text | This bottle is already in the list under this name. |
+
+### TutorialView.swift
+
+| Control | Help text |
+|---|---|
+| Skip Tutorial | Closes the tutorial. Help > Gamify Tutorial opens it again any time. |
+| Back | Goes to the previous step. |
+| Next | Goes to the next step. |
+| Finish | Closes the tutorial. Help > Gamify Tutorial opens it again any time. |
+| Install Rosetta 2… | Runs Apple's installer for Rosetta 2. macOS asks for your password; the download is about 300 MB. |
+| Copy (command) | Copies the Terminal command to the clipboard. |
+| Check Again (Rosetta) | Checks whether Rosetta 2 is installed now. |
+| Bottle picker | The bottle the next steps use for Steam and games. |
+| Name field | The new bottle's name. Cannot start with a dot or contain a slash. |
+| Create Bottle | Creates the bottle with the standard settings (D3DMetal, its own disk). About 40 seconds. |
+| Install Steam | Downloads Steam's official installer and sets Steam up in this bottle; takes a few minutes. Sign in when Steam's window appears. |
+| Launch Steam | Starts Steam in this bottle. |
+| Reveal arrow in the location rows | Show in Finder |
+| Open Settings | Opens Gamify's settings: folders, updates and this tutorial. |
+
+### Updates.swift: UpdateBanner
+
+| Control | Help text |
+|---|---|
+| Release Notes | Opens what changed in this version in your browser. |
+| Later | Hides the notice. Gamify offers the update again on the next launch. |
+| Install Now | Downloads the update, installs it and restarts Gamify. Your bottles and games stay as they are. |
+| Cancel (downloading) | Stops the download. The update is offered again later. |
