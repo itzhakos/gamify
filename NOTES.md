@@ -62,6 +62,15 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
+- **Open bug: Order of the Sinking Star freezes on the user's MacBook Pro with 0.7** (reported
+  2026-10-23; worked on earlier versions; the user says turning the new features off did not
+  help, but settings reach a Steam game only after Restart Steam). Not reproducible on the Mac
+  Studio: 0.7 runtime via Steam, both with the old Steam env and with the full 0.7 env (log says
+  "Vendor: NVIDIA", MetalFX on), ran 2 h 54 min at 60-74 fps with no stall (174 framerate logs);
+  the DMG update path keeps D3DMetal's symlinks. Waiting for the MacBook's macOS/chip/RAM, where
+  it freezes, ~/Library/Logs/Gamify/Steam/<latest>.log and the game's logs/log_*.txt. Candidates
+  to bisect there: metalfx/vendor env (needs Steam restart), HAGS (WINE_DISABLE_HARDWARE_SCHEDULING=1),
+  Game Mode plist keys (macOS-version dependent), XGETBV emulation on older macOS, memory.
 - **Split Fiction test** (2026-10-22/23, user's Steam bottle, docs/perf-research.md "Real-game
   test"): the game has **no DLSS** (FSR 3.1 only), so DLSS->MetalFX is still untested on a real
   game (candidates owned: Cyberpunk 2077, Portal with RTX; no disk space). Measured on the 3D
