@@ -175,7 +175,7 @@ extension Steam {
         return out
     }
 
-    private static func workingDirectory(of pid: pid_t) -> String? {
+    static func workingDirectory(of pid: pid_t) -> String? {
         var info = proc_vnodepathinfo()
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
@@ -192,7 +192,7 @@ extension Steam {
     }
 
     /// argv of a process (KERN_PROCARGS2: argc, exec path, then the NUL-separated argv).
-    private static func commandLine(of pid: pid_t) -> [String] {
+    static func commandLine(of pid: pid_t) -> [String] {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
         guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 4 else { return [] }

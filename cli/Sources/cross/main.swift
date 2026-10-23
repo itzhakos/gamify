@@ -19,6 +19,8 @@ cross - bottle manager and launcher for the winecx runtimes
   cross bottle set <name> hud on|off                 Metal performance HUD (MTL_HUD_ENABLED)
   cross bottle set <name> retina on|off              High Resolution (Retina) mode of the Mac driver
   cross bottle set <name> vendor <hex>|default       GPU vendor id D3DMetal reports (D3DM_VENDOR_ID)
+  cross bottle set <name> debug on|off               debugging mode: more Wine output and metal-HUD
+                                                     frame lines in each launch log
   cross bottle set <name> storage <GB>|unlimited     (also: --storage <GB>)
   cross bottle set <name> location <folder>|default  move the bottle (e.g. to an external drive)
   cross bottle delete <name>
@@ -44,6 +46,12 @@ cross - bottle manager and launcher for the winecx runtimes
   cross programs <bottle> remove <name>
   cross kill  <bottle>                     wineserver -k
   cross env   <bottle> [--export]          print the environment the bottle runs with
+  cross debug export <bottle> [--out <file.zip>] [--since <hours>]
+                                           zip logs, crash reports, system info and game logs of the
+                                           last <hours> (24) for a problem report (default: ~/Desktop)
+  cross debug sample <bottle> [--out <folder>]
+                                           5 s stack sample of the running game and wineserver
+                                           (default folder: ~/Library/Logs/Gamify/<bottle>/)
   cross cache clear <bottle> [<exe name>]  delete D3DMetal's shader cache of one executable (e.g. Game.exe);
                                            without one, list the cache folders and their sizes
 
@@ -86,6 +94,9 @@ is launched through Steam (steam://rungameid/<appid>) unless it is given argumen
 Runtimes: winecx (default) and winecx-full (same Wine + GStreamer, SDL2, MoltenVK),
 both in runtimes/; a bottle keeps the runtime it was created with.
 The project root is found by walking up from the binary (or set CROSS_ROOT).
+Debugging mode (cross.json "debug") applies to programs started afterwards (Steam games: after
+Steam restarts): MTL_HUD_LOG_ENABLED=1 and, instead of -all,
+WINEDEBUG=\(Debug.wineDebug).
 Honoured from the caller's environment: WINEDEBUG (default -all), WINECX_GRAPHICS (overrides
 cross.json), D3DMETAL_HOME (runtimes/d3dmetal), and any variable a performance setting decides
 (WINEESYNC/WINEMSYNC as a pair, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX, D3DM_*): a non-empty
@@ -118,13 +129,7 @@ func parseLocation(_ value: String) -> URL? {
     return URL(fileURLWithPath: (value as NSString).expandingTildeInPath).standardizedFileURL
 }
 
-/// The storage column of `cross bottle list`.
-func storageText(_ bottle: Bottle) -> String {
-    if let error = bottle.storageError { return "unavailable: \(error)" }
-    guard bottle.isImageBacked else { return "folder (no limit)" }
-    guard let usage = bottle.storageUsage else { return "image, not mounted" }
-    return "image \(formatGB(usage.used)) used of \(formatGB(usage.total))"
-}
+func storageText(_ bottle: Bottle) -> String { bottle.storageText }
 
 /// on/off values of `bottle set`.
 func parseSwitch(_ value: String, _ key: String) -> Bool {
@@ -133,32 +138,6 @@ func parseSwitch(_ value: String, _ key: String) -> Bool {
     case "off", "no", "false", "0": return false
     default: fail("\(key) must be on or off, not '\(value)'")
     }
-}
-
-func onOff(_ b: Bool) -> String { b ? "on" : "off" }
-
-/// `cross bottle show`: each performance setting with what it does in this bottle.
-func performanceLines(_ config: BottleConfig) -> [String] {
-    let p = config.performance
-    let d3dmetal = config.graphics == .d3dmetal
-    let env = p.environment(graphics: config.graphics)
-    func vars(_ keys: [String]) -> String {
-        let set = keys.compactMap { k in env[k].flatMap { $0 }.map { "\(k)=\($0)" } }
-        return set.isEmpty ? "" : set.joined(separator: " ")
-    }
-    let onlyD3DMetal = "(D3DMetal bottles only)"
-    var lines: [(String, String, String)] = [
-        ("sync", p.sync.rawValue, vars(["WINEESYNC", "WINEMSYNC"])),
-        ("metalfx", onOff(p.metalfx), d3dmetal ? (p.metalfx ? vars(["D3DM_ENABLE_METALFX"]) + ", nvngx.dll + nvapi64.dll in system32, NGXCore\\FullPath" : "") : onlyD3DMetal),
-        ("avx", onOff(p.avx), vars(["ROSETTA_ADVERTISE_AVX"])),
-        ("raytracing", p.raytracing.map(onOff) ?? "default", d3dmetal ? vars(["D3DM_SUPPORT_DXR"]) : onlyD3DMetal),
-        ("maxfps", p.maxFPS.map(String.init) ?? "off", d3dmetal ? vars(["D3DM_MAX_FPS"]) : onlyD3DMetal),
-        ("hud", onOff(p.hud), vars(["MTL_HUD_ENABLED"])),
-        ("retina", onOff(p.retina), "RetinaMode=\(p.retina ? "Y" : "N")"),
-    ]
-    lines.append(("vendor", p.vendorID.map(PerformanceSettings.hex) ?? "default",
-                  d3dmetal ? (vars(["D3DM_VENDOR_ID"]).isEmpty ? "D3DMetal's own (0x1002)" : vars(["D3DM_VENDOR_ID"])) : onlyD3DMetal))
-    return lines.map { "  " + $0.0.padding(toLength: 12, withPad: " ", startingAt: 0) + $0.1.padding(toLength: 9, withPad: " ", startingAt: 0) + $0.2 }
 }
 
 func main() throws {
@@ -230,13 +209,7 @@ func main() throws {
             guard let b = try Bottle.list(in: project).first(where: { $0.name == name }) else {
                 fail("no bottle '\(name)' in \(project.bottles.path)")
             }
-            print("\(b.name)")
-            print("  runtime     \(b.config.runtime)")
-            print("  graphics    \(b.config.graphics.rawValue)")
-            print("  disk        \(storageText(b))")
-            print("  location    \(b.location?.path ?? b.prefix.path)")
-            print("performance (applies to programs started afterwards):")
-            performanceLines(b.config).forEach { print($0) }
+            b.showLines(in: project).forEach { print($0) }
 
         case "set":
             let name = requireArg(args, 1, "bottle name")
@@ -289,6 +262,8 @@ func main() throws {
                     guard let n = Int(value), n > 0 else { fail("maxfps must be a positive number or off, not '\(value)'") }
                     bottle.config.performance.maxFPS = n
                 }
+            case "debug", "debugging":
+                bottle.config.debug = parseSwitch(value, key)
             case "hud":
                 bottle.config.performance.hud = parseSwitch(value, key)
             case "retina":
@@ -300,7 +275,7 @@ func main() throws {
                     guard let id = PerformanceSettings.parseVendorID(value) else { fail("vendor must be a hex id like 0x10DE or default, not '\(value)'") }
                     bottle.config.performance.vendorID = id
                 }
-            default: fail("unknown setting '\(key)' (graphics, storage, location, sync, metalfx, avx, raytracing, maxfps, hud, retina, vendor)")
+            default: fail("unknown setting '\(key)' (graphics, storage, location, sync, metalfx, avx, raytracing, maxfps, hud, retina, vendor, debug)")
             }
             try bottle.saveConfig()
             print("\(name): \(key) = \(value)")
@@ -518,6 +493,42 @@ func main() throws {
         let export = args.contains("--export")
         for line in Runtime.environmentLines(try runtime.environment(for: bottle), export: export) {
             print(line)
+        }
+
+    case "debug":
+        let sub = requireArg(args, 0, "debug subcommand")
+        let bottle = try Bottle.load(name: requireArg(args, 1, "bottle name"), in: project)
+        func option(_ name: String) -> String? {
+            args.firstIndex(of: name).map { requireArg(args, $0 + 1, String(name.dropFirst(2))) }
+        }
+        func path(_ text: String) -> URL { URL(fileURLWithPath: (text as NSString).expandingTildeInPath).standardizedFileURL }
+        switch sub {
+        case "export":
+            var hours = 24.0
+            if let text = option("--since") {
+                guard let h = Double(text), h > 0 else { fail("--since takes a number of hours, not '\(text)'") }
+                hours = h
+            }
+            let desktop = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
+            var out = option("--out").map(path) ?? desktop.appendingPathComponent(Debug.defaultExportName(bottle: bottle.name))
+            if out.pathExtension.lowercased() != "zip" { out.appendPathExtension("zip") }
+            let result = try Debug.export(bottle: bottle, project: project, to: out, sinceHours: hours,
+                                          progress: { print("debug: \($0)") })
+            result.summary.forEach { print("  " + $0) }
+            if !result.notes.isEmpty {
+                print("not included (see the READMEs):")
+                result.notes.forEach { print("  " + $0) }
+            }
+            print("wrote \(result.zip.path) (\(ByteCountFormatter.string(fromByteCount: result.bytes, countStyle: .file)))")
+        case "sample":
+            let folder = option("--out").map(path) ?? Debug.logsRoot.appendingPathComponent(bottle.name)
+            print("sampling for \(Debug.sampleSeconds) s ...")
+            let result = Debug.sample(bottle: bottle, into: folder)
+            if let t = result.target { print("game: \(t.program) (pid \(t.pid))") }
+            result.notes.forEach { print("note: " + $0) }
+            result.files.forEach { print("wrote \($0.path)") }
+        default:
+            fail("unknown debug subcommand '\(sub)'\n\n" + usage)
         }
 
     case "cache":

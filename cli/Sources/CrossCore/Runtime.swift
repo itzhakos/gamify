@@ -134,7 +134,9 @@ public struct Runtime {
     /// to inherit (WINEDEBUG, DYLD fallback paths and WINECX_GRAPHICS are honoured when
     /// already set, like the script). The bottle's performance settings decide WINEESYNC/
     /// WINEMSYNC, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX and the D3DM_* variables, except
-    /// where `base` already sets one (non-empty): the caller's value wins.
+    /// where `base` already sets one (non-empty): the caller's value wins. Debugging mode
+    /// (`BottleConfig.debug`) swaps WINEDEBUG's `-all` for `Debug.wineDebug` and adds
+    /// `Debug.environment`, again only where the caller sets nothing.
     public func environment(for bottle: Bottle, base: [String: String] = ProcessInfo.processInfo.environment) throws -> [String: String] {
         var env = base
         let graphics = try self.graphics(for: bottle, base: base)
@@ -171,7 +173,7 @@ public struct Runtime {
         ].joined(separator: ":")
         env["WINELOADER"] = wineloader.path
         env["WINESERVER"] = wineserver.path
-        env["WINEDEBUG"] = nonEmpty(base["WINEDEBUG"]) ?? "-all"
+        env["WINEDEBUG"] = nonEmpty(base["WINEDEBUG"]) ?? (bottle.config.debug ? Debug.wineDebug : "-all")
         env["DOTNET_EnableWriteXorExecute"] = "0"   // CrossOver sets this for .NET under Rosetta
         // Performance settings (Performance.swift). WINEESYNC and WINEMSYNC are one choice:
         // a caller that sets either keeps both as given.
@@ -179,6 +181,10 @@ public struct Runtime {
         for (key, value) in bottle.config.performance.environment(graphics: graphics) where nonEmpty(base[key]) == nil {
             if callerSync && PerformanceSettings.syncVariables.contains(key) { continue }
             env[key] = value
+        }
+        // Debugging mode (Debug.swift): more diagnostics in each launch's log.
+        if bottle.config.debug {
+            for (key, value) in Debug.environment where nonEmpty(base[key]) == nil { env[key] = value }
         }
         env["PATH"] = [home.appendingPathComponent("bin").path, base["PATH"] ?? "/usr/bin:/bin"].joined(separator: ":")
         // winecx-full only: GStreamer's plugin dir and scanner are compiled in as absolute

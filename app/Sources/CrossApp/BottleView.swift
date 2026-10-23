@@ -30,6 +30,7 @@ struct BottleView: View {
                     .disabled(model.storageWork[bottle.name] != nil)
                 PerformanceBox(bottle: bottle)
                     .disabled(model.storageWork[bottle.name] != nil)
+                DebugBox(bottle: bottle).disabled(model.storageWork[bottle.name] != nil)
                 HStack(alignment: .top, spacing: 12) {
                     storesBox
                     ProgramsBox(bottle: bottle)
