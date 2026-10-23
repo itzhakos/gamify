@@ -68,6 +68,14 @@ What is live, in one place; everything below it is the chronological log (dead e
   Bottle, Move to… / Eject on the bottle page, Find Bottles… + a banner when a drive with
   unlisted bottles is connected, Settings > Paths "Bottles folder" (CROSS_BOTTLES, which now
   moves only the bottles, not downloads). docs/app.md "Bottles on other drives".
+- **Debugging mode and log export** (2026-10-23, branch claude/debug-export-e1b029, for 0.8):
+  per-bottle `debug` (cross.json; `cross bottle set <b> debug on`; Debugging box toggle) sets
+  `WINEDEBUG=+timestamp,+pid,err+all,fixme+all,warn+seh,warn+module,+loaddll` and
+  `MTL_HUD_LOG_ENABLED=1` (per-second metal-HUD lines; real games only, not d3dtest).
+  `cross debug export <b> [--out] [--since h]` / Export Logs… writes one zip (samples, gamify,
+  system, logs, crash-reports, system-log, game-logs, each with a README; 16 s, ~300 KB here);
+  `cross debug sample <b>` / Sample Running Game = `sample` of the game + wineserver. Ask the
+  Sinking Star user for this zip. docs/app.md "Debugging mode and log export".
 - **Open bug: Order of the Sinking Star freezes on the user's MacBook Pro with 0.7** (reported
   2026-10-23; worked on earlier versions; the user says turning the new features off did not
   help, but settings reach a Steam game only after Restart Steam). Not reproducible on the Mac

@@ -28,13 +28,16 @@ public struct BottleConfig: Codable, Equatable {
     public var storage: BottleStorage?
     /// Sync, DLSS via MetalFX, AVX, ray tracing, FPS cap, HUD, Retina (Performance.swift).
     public var performance = PerformanceSettings()
+    /// Debugging mode: programs started afterwards log more (Debug.swift, `Debug.environment`).
+    public var debug: Bool = false
 
     public init(runtime: String = Runtime.defaultName, graphics: Graphics = .d3dmetal, storage: BottleStorage? = nil,
-                performance: PerformanceSettings = PerformanceSettings()) {
+                performance: PerformanceSettings = PerformanceSettings(), debug: Bool = false) {
         self.runtime = runtime
         self.graphics = graphics
         self.storage = storage
         self.performance = performance
+        self.debug = debug
     }
 
     /// Missing keys take their defaults (cross.json files written before a key existed).
@@ -44,6 +47,7 @@ public struct BottleConfig: Codable, Equatable {
         graphics = try c.decodeIfPresent(Graphics.self, forKey: .graphics) ?? .d3dmetal
         storage = try c.decodeIfPresent(BottleStorage.self, forKey: .storage)
         performance = try c.decodeIfPresent(PerformanceSettings.self, forKey: .performance) ?? PerformanceSettings()
+        debug = try c.decodeIfPresent(Bool.self, forKey: .debug) ?? false
     }
 }
 

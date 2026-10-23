@@ -212,8 +212,8 @@ For a Finder-like launch from a terminal:
 - Only the winecx runtime is driven, same as the CLI. Bottles on gptk/wine11/sikarugir
   are shown read-only.
 - Program list since 2026-10-20 (see "Stores and programs"); still no icons, no
-  winetricks/DLL overrides UI, no free-form per-bottle env overrides (WINEDEBUG comes only from the
-  app's environment; sync, HUD, AVX and the D3DM_* variables are Performance settings since
+  winetricks/DLL overrides UI, no free-form per-bottle env overrides (WINEDEBUG comes from the
+  app's environment, or from Debugging mode since 2026-10-23; sync, HUD, AVX and the D3DM_* variables are Performance settings since
   2026-10-22), no app icon.
 - The job list is in memory only; logs stay on disk. A game started by Steam is
   Steam's child, not a job, so use Kill Bottle for it.
@@ -1314,3 +1314,113 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 | Later | Hides the notice. Gamify offers the update again on the next launch. |
 | Install Now | Downloads the update, installs it and restarts Gamify. Your bottles and games stay as they are. |
 | Cancel (downloading) | Stops the download. The update is offered again later. |
+
+## Debugging mode and log export (2026-10-23)
+Why: a user reported a game freezing on another Mac (Order of the Sinking Star on a MacBook Pro
+with 0.7) and we had no way to get diagnostics from them. Two pieces: a per-bottle **Debugging
+mode** that makes programs log more, and **Export Logs…**, one zip with everything we need,
+each folder with a README.txt that says what is in it and why. Code: CrossCore `Debug.swift`,
+`cross debug`, app `DebugView.swift` (one line in BottleView, below Performance).
+
+### Debugging mode (`BottleConfig.debug`, cross.json `"debug": true`, default off)
+`Runtime.environment(for:)` then sets, each only where the caller's environment has no
+non-empty value (the caller wins, as for every other variable):
+- `WINEDEBUG=+timestamp,+pid,err+all,fixme+all,warn+seh,warn+module,+loaddll` instead of `-all`:
+  Wine's default err+fixme output, exception and module-load warnings, every DLL load with
+  native/builtin (which d3d11/dxgi/nvngx a game really got), and a `<seconds>:<pid>:<tid>:`
+  prefix on every line, so a freeze shows as the point where output stops. `+seh` (trace) is
+  left out on purpose: it dumps registers for every exception and floods games that use
+  exceptions for control flow. Crashes are printed anyway ("wine: Unhandled page fault …
+  starting debugger…" is a MESSAGE, independent of WINEDEBUG).
+- `MTL_HUD_LOG_ENABLED=1`: Apple's libMTLHud logs one NSLog line per second
+  (`metal-HUD: <frame counter>,<mem>,<mem>,<present ms>,<gpu ms>,…` for every frame of that
+  second) to stderr, i.e. into the launch log, and to the unified log (subsystem libMTLHud,
+  process `wine`). It does not need the on-screen HUD (`MTL_HUD_ENABLED=0`). About 1-2 KB per
+  second at 60 fps.
+DXVK, DXMT and MoltenVK already log at `info` by default (DXVK's log goes to
+`<prefix>/cache/dxvk`), so nothing is added for them. Like the Performance settings it applies
+to programs started afterwards; a game started by Steam inherits Steam's environment, so Steam
+has to be restarted (Restart Steam). `cross bottle show` prints the line `debugging on (…)`.
+Every launch keeps its stdout/stderr in `~/Library/Logs/Gamify/<bottle>/<stamp>-<label>.log` as
+before (`cross run` prints to the terminal; the app and `cross install` write those files).
+
+### The zip (`Debug.export`)
+`Gamify-logs-<bottle>-<yyyyMMdd-HHmm>.zip` holds one folder of the same name with a README.txt
+(when, which bottle, what each folder is, a privacy note: paths with the macOS user name, game
+names and the Steam account name appear; nothing is stripped) and:
+
+| folder | contents |
+|---|---|
+| `samples/` | collected **first**, so a frozen game is caught before the slow steps: the bottle's processes (libproc cwd scan + `ps` CPU/mem/state/elapsed) and, when a game runs, `sample <pid> 5` of the newest non-Wine process (steam.exe only when nothing else runs) and of the bottle's wineserver (found by its cwd `…/server-<dev>-<ino>` of the prefix), at the same time |
+| `gamify/` | `version.txt` (app version + build from the running app's Info.plist, or the bundle around a packaged root / app/Info.plist in a checkout; `runtime-version`; git commit in a checkout; `wine --version`), `cross.json`, `programs.json`, `bottle-show.txt` (`cross bottle show`), `env.txt` (`cross env`, the environment of the process that exported), `programs.txt` (`cross programs`), `steam-games.txt` + `steam-check.txt` (`Steam.check(fix: false)`, only with Steam installed), `d3dmetal-files.txt` (x86_64-unix/-windows with symlink targets: the .so files must be symlinks) |
+| `system/` | `sw_vers`, `sysctl` (chip, model, memory, cores), `system_profiler SPDisplaysDataType`, `df -h` of home/bottle/Gamify, Rosetta (probe + pkgutil), `pmset -g`, `pmset -g therm`, `memory_pressure -Q`, `top -l 1` (top 25 by CPU) |
+| `logs/` | Gamify's launch logs of the bottle from the last N hours (newest 20), the 3 newest wineserver logs; Sample Running Game results land here too |
+| `crash-reports/` | `.ips/.crash/.hang/.spin/.diag` from `~/Library/Logs/DiagnosticReports` (+ `Retired`) of the last N hours named wine*, wineloader, wineserver, steam*, gamify/crossapp/cross-, or after an exe of the Programs list, a running bottle process or a Steam game (exes 3 levels deep); `ExcUserFault_<name>` counts, the Mac Steam client (`steam_osx`) does not |
+| `system-log/` | one `log show --last <N*60>m --style compact --predicate 'process BEGINSWITH "wine" OR category == "D3DMetal" OR (process == "kernel" AND (eventMessage CONTAINS[c] "gpu" OR eventMessage CONTAINS "AGX"))'`, split while streaming into `d3dmetal.txt`, `metal-hud.txt`, `gpu-kernel.txt`, `wine.txt` (Core Audio/App Intents/text-input noise dropped and counted), newest 20000 lines each |
+| `game-logs/` | for every Programs entry (the exe's folder, one up from bin/Binaries/Win64) and every installed Steam game folder, plus the Windows user's `AppData/Local`, `LocalLow`, `Roaming`, `Documents/My Games`, `Documents` and Steam's `logs/`: `*.log`, and `*.txt`/`*.json` inside a `log`/`logs` folder, modified in the last N hours (6 levels, 40 000 entries, 30 newest per root, cache/shader/steamapps folders skipped, symlinks not followed); Unreal `Saved/Config/**/GameUserSettings.ini` / `Engine.ini` whatever their date |
+
+Limits: each copied file at most 5 MB (bigger ones keep the first 1 MB and the last 4 MB with a
+`[... cut N bytes of M ...]` marker, noted in the README), 120 MB uncompressed in total, then
+files are skipped with a note. Every missing source (no Steam, no crash report, a command that
+failed or timed out) is a line under "Not included / problems" in that folder's README, never
+an error; only failing to write the zip throws. The zip is written with `ditto -c -k --norsrc
+--noextattr --noacl --keepParent` (no `._` files). Why not `eventMessage CONTAINS "D3DM"` in
+the log predicate: message-text clauses made `log show` scan 24 h in 2 min 11 s against 11 s
+for process/category clauses, so the split happens in Swift. macOS Game Mode is not included:
+gamepolicyd logs nothing readable about it (24 h: one "requestLaunchGamesApp").
+
+### CLI
+```
+cross bottle set <bottle> debug on|off
+cross debug export <bottle> [--out <file.zip>] [--since <hours>]   (default ~/Desktop/<default name>, 24 h)
+cross debug sample <bottle> [--out <folder>]                      (default ~/Library/Logs/Gamify/<bottle>/)
+```
+`cross bottle show` moved its text into CrossCore (`Bottle.showLines`, `storageText`,
+`performanceLines`) so the export prints the same; the output is unchanged apart from the new
+`debugging` line.
+
+### App (`DebugView.swift`)
+A Debugging box under Performance: **Debugging mode** toggle (saves cross.json; help text says
+what it changes and "applies to programs started afterwards; for Steam games restart Steam"),
+**Export Logs…** (NSSavePanel on the Desktop with the default name, export in the background
+with the current step shown, then "Saved <name> (<size>)" and **Reveal in Finder**), **Sample
+Running Game** (`Debug.sample` into the bottle's logs folder, then Reveal in Finder), and the
+line "Send the zip when you report a problem." Every control has a `.help` tooltip.
+
+### Verified (2026-10-23, scratch bottle `dbg` on winecx, CROSS_BOTTLES in the session scratchpad)
+- `cross env dbg`: `WINEDEBUG=-all`, no MTL_HUD_LOG_ENABLED; after `cross bottle set dbg debug on`:
+  `WINEDEBUG=+timestamp,+pid,err+all,fixme+all,warn+seh,warn+module,+loaddll` and
+  `MTL_HUD_LOG_ENABLED=1`; `WINEDEBUG=-all cross env dbg` keeps `-all` (caller wins).
+- `cross run dbg src/d3dtest/d3d11test.exe 1200 0` with stdout/stderr in a launch-log file: works
+  with debugging on; the log grows from 5 lines / 261 bytes to 30 lines / 3.9 KB (timestamped
+  `trace:loaddll` lines for d3d11test.exe (native), d3d11.dll, dxgi.dll …, `warn:module`, one
+  `err:vulkan`, `fixme:keyboard`). Speed: 120.9 / 121.1 fps off vs 120.0 / 120.0 fps on (two runs
+  each; the test is capped by the display, so this only shows no stall). In a first-start run
+  the extra output was 61 lines in total.
+- **metal-HUD lines did not appear for d3d11test/d3d12test** (windowed, fullscreen, 10-50 s,
+  with and without `MTL_HUD_ENABLED=1`, `MTL_HUD_MIN_WIDTH_REQUIRED=0`, frontmost or not): with the
+  HUD off libMTLHud is not even loaded for them, with it on it loads but logs nothing. In a real
+  game it works: the Split Fiction runs of 2026-10-22 (bottle `hud` setting off, only
+  `MTL_HUD_LOG_ENABLED=1`) have 155-280 `metal-HUD:` lines in their launch logs, and the unified
+  log still held 3858 of them, which the export's `system-log/metal-hud.txt` picked up.
+- `cross debug export dbg`: 16 s, 303 KB; README.txt at the top and in each of the 7 folders;
+  `gamify/` 6-7 files, `system/` 9, `logs/` the launch logs, `system-log/` 5 (d3dmetal.txt 38
+  lines, metal-hud.txt 3858, wine.txt newest 20000 of 136027), "not included" notes for Steam
+  (not installed), crash reports (none in 24 h), samples (no game running). First version took
+  2 min 36 s and produced `._` files and a 300 KB gamepolicyd file: fixed as described above.
+- With a fake game (d3d11test.exe in `C:\Program Files\TestGame` added as a program,
+  `logs/log_1.txt`, AppData `TestGame/Saved/Logs/TestGame.log` and `Saved/Config/Windows/Engine.ini`
+  + `GameUserSettings.ini`) and `d3d11test.exe 2000` running: export 32 s, 384 KB, `samples/` with
+  `…-processes.txt` (8 bottle processes + wineserver, ps state SN, 24.5% CPU),
+  `…-sample-d3d11test.txt` (535 KB, "Code Type: X86-64 (translated)", symbolicated
+  `__wine_main (in ntdll.so)` stacks) and `…-sample-wineserver.txt`; `game-logs/Test Game/logs/log_1.txt`
+  and `game-logs/AppData Local/TestGame/Saved/...` (4 files). The game kept running (113 fps
+  while sampled, 120 otherwise).
+- `--since 170`: `crash-reports/wine-2026-10-17-165353.ips` included; `ExcUserFault_steam_osx-…`
+  (Mac Steam) and `statustest-…` not.
+- A 7.2 MB launch log is cut to 5 MB with the marker and a README note.
+- `cross debug sample dbg` (8 s) and `--out <folder>`: processes + game + wineserver files.
+- The app builds (`app/build.sh`). **Not checked on screen**: screen access to the app was
+  declined, so the box, the save panel and Reveal in Finder were not seen or clicked.
+- Not tested: `steam-check.txt`/`steam-games.txt` on a bottle with Steam (the scratch bottle
+  has none; the user's bottles were not touched), a real crash, a real frozen game.
