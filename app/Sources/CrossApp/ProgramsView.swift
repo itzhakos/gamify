@@ -38,9 +38,9 @@ struct ProgramsBox: View {
                 }
                 HStack {
                     Button("Install a Program…") { chooseInstaller() }
-                    .help("Runs an installer (.exe, or .msi through msiexec /i) in this bottle with its log below; the shortcuts it creates appear in this list")
+                    .help(HelpText.programsInstall)
                     Button("Add a Program…") { chooseExe() }
-                        .help("Adds an exe inside this bottle's C: drive to the list, with optional arguments")
+                        .help(HelpText.programsAdd)
                     Spacer(minLength: 0)
                 }
                 .controlSize(.small)
@@ -71,34 +71,33 @@ struct ProgramsBox: View {
                 Text(program.exe + (program.arguments.isEmpty ? "" : " " + program.arguments))
                     .font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
-                    .help(program.exe + (program.shortcut.map { "\nShortcut: \($0)" } ?? ""))
+                    .help(HelpText.programPath(program.exe, shortcut: program.shortcut))
             }
             Spacer()
             Button("Launch") { model.launchProgram(program, in: bottle.name) }
                 .controlSize(.small)
-                .help("Runs \(program.exe) with its folder as the working directory")
+                .help(HelpText.programLaunch)
             Menu {
                 let cache = model.shaderCache(for: program)
                 Button(cache.map { "Clear Shader Cache (\($0.sizeText))…" } ?? "No Shader Cache Yet") {
                     cacheToClear = cache
                 }
                 .disabled(cache == nil)
+                .help(HelpText.programClearShaderCache)
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("More: Clear Shader Cache… deletes D3DMetal's compiled shaders for \(ShaderCache.exeName(program.exe))")
+            .help(HelpText.programMenu)
             Button {
                 model.removeProgram(program, in: bottle.name)
             } label: {
                 Image(systemName: "minus.circle")
             }
             .buttonStyle(.borderless)
-            .help(program.source == .shortcut
-                  ? "Remove from this list (the shortcut and the program stay in the bottle)"
-                  : "Remove from this list (the program stays in the bottle)")
+            .help(program.source == .shortcut ? HelpText.programRemoveShortcut : HelpText.programRemove)
         }
     }
 
@@ -108,7 +107,9 @@ struct ProgramsBox: View {
             Text(exe.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             Form {
                 TextField("Name", text: $addName)
+                    .help(HelpText.addProgramName)
                 TextField("Arguments", text: $addArguments, prompt: Text("optional"))
+                    .help(HelpText.addProgramArguments)
             }
             HStack {
                 Spacer()
@@ -119,6 +120,7 @@ struct ProgramsBox: View {
                     adding = nil
                 }
                 .keyboardShortcut(.defaultAction)
+                .help(HelpText.addProgramAdd)
             }
         }
         .padding()

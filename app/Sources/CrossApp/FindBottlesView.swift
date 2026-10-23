@@ -32,7 +32,9 @@ struct FindBottlesSheet: View {
                 }
                 Spacer()
                 Button("Search Drives Again") { search(nil) }.disabled(searching)
+                    .help(HelpText.findSearchDrives)
                 Button("Search a Folder…", action: chooseFolder).disabled(searching)
+                    .help(HelpText.findSearchFolder)
             }
             .font(.callout)
             List {
@@ -68,6 +70,7 @@ struct FindBottlesSheet: View {
             Spacer()
             if let listed = f.registeredAs {
                 Text("listed as '\(listed)'").font(.callout).foregroundStyle(.secondary)
+                    .help(HelpText.findListed)
             } else if adding.contains(f.id) {
                 ProgressView().controlSize(.small)
             } else {
@@ -75,9 +78,10 @@ struct FindBottlesSheet: View {
                 TextField("Name", text: Binding(get: { name }, set: { names[f.id] = $0 }))
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 110)
+                    .help(HelpText.findName)
                 Button("Add") { add(f, as: name) }
                     .disabled(model.newBottleNameError(name) != nil || name.isEmpty)
-                    .help(model.newBottleNameError(name) ?? "List this bottle; it stays where it is")
+                    .help(model.newBottleNameError(name) ?? HelpText.findAdd)
             }
         }
         .padding(.vertical, 2)
