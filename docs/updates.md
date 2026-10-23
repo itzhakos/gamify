@@ -219,3 +219,10 @@ and installed copies fetch `Gamify-0.7.dmg` (575 MB) instead of the 2.3 MB app z
 with `RELEASE_NOTES` set (feature list) by `scripts/release.sh 0.7`; the Homebrew cask was
 bumped by the script. Not verified yet: an installed 0.6 updating itself to 0.7 through the DMG
 path (the app-zip path was verified for 0.1 -> 0.2).
+
+## 0.8 (2026-10-23): app-layer update again
+
+Hover help (`HelpText.swift`) and the Debugging box (`DebugView.swift`, CrossCore `Debug.swift`)
+change only the app layer: `runtime-version` stayed `winecx-full-b06c9dee8503`, so an installed
+0.7 takes `Gamify-app-0.8.zip` (2.5 MB); older installs take the DMG. Published with
+`scripts/release.sh 0.8`.

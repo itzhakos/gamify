@@ -155,8 +155,10 @@ What is live, in one place; everything below it is the chronological log (dead e
   relaunches. `scripts/release.sh <ver>` publishes. 0.1-0.3 are published (2026-10-17/18), 0.4 (per-bottle disk allocation) on 2026-10-19, 0.5/0.6
   on 2026-10-20 and **0.7 on 2026-10-23** (Performance settings, DLSS->MetalFX plumbing, rebuilt
   runtime with the CrossOver 26.1 hacks, DXVK + DXMT backends; runtime-version
-  winecx-full-b06c9dee8503, so installed copies take the full 575 MB DMG, not the app zip); a
-  0.1 installed from GitHub updated itself to 0.2. docs/updates.md.
+  winecx-full-b06c9dee8503, so installed copies take the full 575 MB DMG, not the app zip) and
+  **0.8 on 2026-10-23** (hover help on every control, Debugging mode + Export Logs; same
+  runtime-version, so 0.7 users get the 2.5 MB app zip); a 0.1 installed from GitHub updated
+  itself to 0.2. docs/updates.md.
 - **Repository**: https://github.com/itzhakos/gamify (private, since 2026-10-17). Sources, scripts
   and docs only; runtimes/bottles/downloads/upstream/dist are rebuilt locally (see README.md).
 - **Docs**: README.md, docs/app.md, docs/packaging.md, docs/runtime-full.md, docs/d3dmetal3.md, docs/perf-research.md,
