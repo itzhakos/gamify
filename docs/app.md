@@ -1114,7 +1114,7 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 | Move to… menu | Moves this bottle to another folder or drive, e.g. an external SSD, or back to the bottles folder. It is copied and checked before the original is removed, so nothing is lost. Close its programs first. |
 | Move to… > Choose a Folder… | Picks the folder or drive to move this bottle to. It then runs from there while the drive is connected. |
 | Move to… > The Bottles Folder | Moves the bottle back to Gamify's bottles folder on this Mac. |
-| Move to… > Eject | Unmounts this bottle's disk image so the drive can be ejected safely. The bottle mounts again the next time you use it. |
+| Move to… > Eject | Unmounts this bottle's disk image so the drive can be ejected safely. Click Mount on the bottle's page to use it again. |
 | Change… (image bottle) | Changes how much space this bottle may take. Windows sees C: as a drive of that size. Close its programs first. |
 | Move to a Disk Image… (folder bottle) | Puts this bottle into its own disk image with a size limit you choose, like a virtual drive. The image only takes the space actually used. |
 
@@ -1184,7 +1184,7 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 | New Bottle (+) toolbar button | Creates a new bottle: a separate Windows installation with its own C: drive, settings and programs. |
 | Find Bottles… | Searches connected drives, or a folder you choose, for bottles that are not in the list, e.g. one made on another Mac. |
 | Sidebar menu: Show in Finder | Opens the bottle's folder in Finder. |
-| Sidebar menu: Eject | Unmounts this bottle's disk image so its drive can be ejected safely. |
+| Sidebar menu: Eject | Unmounts this bottle's disk image so its drive can be ejected safely. Click Mount on the bottle's page to use it again. |
 | Sidebar menu: Remove from List… | Takes the bottle off the list but keeps its files. Find Bottles… adds it back. |
 | Sidebar menu: Delete Bottle… | Deletes the bottle with everything installed in it. Cannot be undone. |
 
@@ -1225,7 +1225,7 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 | Control | Help text |
 |---|---|
 | Check for updates on launch | Looks for a new Gamify version each time the app starts. Only a small version file is fetched; nothing about you or your Mac is sent. |
-| Install updates automatically | Downloads and installs a new version by itself when one is found, then restarts Gamify. An update that replaces the Wine runtime waits until no game or Steam is running. |
+| Install updates automatically | Downloads and installs a new version by itself when one is found, then restarts Gamify. An update that replaces the Wine runtime is skipped while a game or Steam is running; quit them and check again. |
 | Check Now | Looks for a new version right now. |
 | Runtime | The version of the Wine runtime bundled with Gamify. "not versioned" means Gamify runs from a source checkout. |
 

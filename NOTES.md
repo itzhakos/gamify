@@ -2,6 +2,12 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **Hover help** (2026-10-23, branch claude/hover-help-c67e37, for 0.8): every button, toggle,
+  picker and field in the app (Performance box, Graphics pickers, Disk/Location, Stores, Programs,
+  Steam row, Settings, New Bottle, Find Bottles, tutorial, update banner) has a plain-language
+  macOS tooltip (SwiftUI `.help`); texts live in `app/Sources/CrossApp/HelpText.swift`, listed
+  in docs/app.md "Hover help". Developer-flavoured texts (env variable names, wineserver flags)
+  were replaced. Written by an Opus 5.5 subagent, reviewed and built here; not checked on screen.
 - **2026-10-22 CrossOver 26.1 ports** (branch claude/wine-hags-avx-5bfccc): `src/patches/`
   `win32u-d3dkmt-hwsched.patch` (CW HACK 24905: `D3DKMTQueryAdapterInfo(KMTQAITYPE_WDDM_2_7_CAPS)`
   reports HAGS when `WINECX_GRAPHICS=d3dmetal`, opt-out `WINE_DISABLE_HARDWARE_SCHEDULING=1`;

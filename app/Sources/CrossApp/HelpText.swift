@@ -72,8 +72,8 @@ enum HelpText {
         """
     static let moveBottlesFolder = "Moves the bottle back to Gamify's bottles folder on this Mac."
     static let moveEject = """
-        Unmounts this bottle's disk image so the drive can be ejected safely. The bottle \
-        mounts again the next time you use it.
+        Unmounts this bottle's disk image so the drive can be ejected safely. Click Mount on \
+        the bottle's page to use it again.
         """
     static let changeSize = """
         Changes how much space this bottle may take. Windows sees C: as a drive of that size. \
@@ -223,7 +223,8 @@ enum HelpText {
         """
     static let sidebarShowInFinder = "Opens the bottle's folder in Finder."
     static let sidebarEject = """
-        Unmounts this bottle's disk image so its drive can be ejected safely.
+        Unmounts this bottle's disk image so its drive can be ejected safely. Click Mount on \
+        the bottle's page to use it again.
         """
     static let sidebarRemoveFromList = """
         Takes the bottle off the list but keeps its files. Find Bottles… adds it back.
@@ -291,8 +292,8 @@ enum HelpText {
         """
     static let updatesAutoInstall = """
         Downloads and installs a new version by itself when one is found, then restarts \
-        Gamify. An update that replaces the Wine runtime waits until no game or Steam is \
-        running.
+        Gamify. An update that replaces the Wine runtime is skipped while a game or Steam is \
+        running; quit them and check again.
         """
     static let updatesCheckNow = "Looks for a new version right now."
     static let updatesRuntimeVersion = """
