@@ -941,7 +941,7 @@ CW HACK 24905, another session's work in src/patches).
 
 | Setting (cross.json) | Default | Maps to | Notes |
 |---|---|---|---|
-| `sync`: `esync` \| `msync` | esync | `WINEESYNC=1` or `WINEMSYNC=1` (exactly one) | msync = Mach semaphores; change only while nothing runs in the bottle (the wineserver keeps its mode). |
+| `sync`: `auto` \| `esync` \| `msync` | auto (= msync since 0.9; esync before) | `WINEESYNC=1` or `WINEMSYNC=1` (exactly one), from `SyncMode.effective` | msync = Mach semaphores + ulock waits, esync = a pipe pair per object polled with `poll()` (macOS has no eventfd). Measured on Dishonored 2 (2026-10-24, NOTES.md): esync kept 36-57% of the game's CPU samples inside ntdll's wait path and the game dropped frames; msync 18% and a steady 60 fps. CrossOver's macOS default is msync as well. Change only while nothing runs in the bottle (the wineserver keeps its mode; Steam games need Restart Steam). The block carries `"version": 2` since 0.9: a block without it (0.7/0.8 wrote every field, default esync) loads an explicit `esync` as `auto`, so existing bottles move to msync by themselves; `esync` written by 0.9 or later is a choice and stays. |
 | `metalfx` | on | D3DMetal only: `D3DM_ENABLE_METALFX=1`, `D3DM_VENDOR_ID=0x10DE`; `system32\nvngx.dll` + `nvapi64.dll` (copied from `runtimes/d3dmetal/x86_64-windows` when missing); `HKLM\Software\NVIDIA Corporation\Global\NGXCore\FullPath = C:\windows\system32` (REG_SZ) | Off: the variables are not set; files and registry value stay. With the NVIDIA vendor id Streamline-based games accept the adapter (it still says "AMD Compatibility Mode"). |
 | `avx` | off | `ROSETTA_ADVERTISE_AVX=1` | Without the XGETBV hack (stage 2, CW HACK 23427) a game that executes `xgetbv` after seeing AVX can still die. |
 | `raytracing` | default (absent) | `D3DM_SUPPORT_DXR=1` / `0` | D3DMetal only; absent = D3DMetal's default (on for M3 and later). |
@@ -959,7 +959,7 @@ deletes these folders (by exe name, case-insensitive, never outside `d3dm/`).
 
 ```
 cross bottle show <name>                           runtime, graphics, disk, location, each performance setting and its effect
-cross bottle set <name> sync esync|msync
+cross bottle set <name> sync auto|esync|msync      (auto = msync)
 cross bottle set <name> metalfx on|off             (alias dlss)
 cross bottle set <name> avx on|off
 cross bottle set <name> raytracing on|off|default  (alias dxr)
@@ -977,7 +977,7 @@ cross cache clear <bottle> [<exe name>]            without an exe: list the cach
 ### App
 
 - Bottle page, below the Run .exe / Wine Configuration box: a **Performance** box
-  (`PerformanceBox` in BottleView.swift) with Sync (ESync/MSync), DLSS via MetalFX
+  (`PerformanceBox` in BottleView.swift) with Sync (Automatic/ESync/MSync), DLSS via MetalFX
   ("Games that offer DLSS get MetalFX upscaling and frame generation"; disabled for
   wined3d), Advertise AVX, Ray tracing (Default/On/Off), FPS cap (empty = off), Metal HUD,
   Retina (High Resolution), and the note that settings apply to programs started afterwards.
@@ -1154,7 +1154,7 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 
 | Control | Help text |
 |---|---|
-| Sync picker | How Windows programs wait for each other. ESync works everywhere; MSync is sometimes faster in games. Switch only if a game stutters, and only while nothing runs in this bottle. |
+| Sync picker | How Windows programs wait for each other. Automatic uses MSync, the fast native macOS way, which keeps games smoother (Dishonored 2 dropped frames on ESync and not on MSync). Pick ESync only if a program misbehaves on MSync, and change this only while nothing runs in this bottle; for Steam games, restart Steam afterwards. |
 | DLSS via MetalFX (D3DMetal bottle) | Games that offer DLSS in their settings get Apple's MetalFX upscaling instead, and frame generation on macOS 26 or newer. Leave it on unless a game shows a graphics-driver warning. For Steam games, restart Steam after changing it. |
 | DLSS via MetalFX (disabled, other backend) | DLSS via MetalFX needs the D3DMetal graphics backend. Pick D3DMetal above to use it. |
 | Advertise AVX | Tells games this Mac supports AVX, a set of CPU instructions some newer games require. Turn it on only if a game refuses to start with a message about AVX or an unsupported CPU. |

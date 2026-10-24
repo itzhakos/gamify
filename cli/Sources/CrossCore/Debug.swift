@@ -823,7 +823,7 @@ extension Bottle {
         }
         let onlyD3DMetal = "(D3DMetal bottles only)"
         var lines: [(String, String, String)] = [
-            ("sync", p.sync.rawValue, vars(["WINEESYNC", "WINEMSYNC"])),
+            ("sync", p.sync.text, vars(["WINEESYNC", "WINEMSYNC"])),
             ("metalfx", onOff(p.metalfx), d3dmetal ? (p.metalfx ? vars(["D3DM_ENABLE_METALFX"]) + ", nvngx.dll + nvapi64.dll in system32, NGXCore\\FullPath" : "") : onlyD3DMetal),
             ("avx", onOff(p.avx), vars(["ROSETTA_ADVERTISE_AVX"])),
             ("raytracing", p.raytracing.map(onOff) ?? "default", d3dmetal ? vars(["D3DM_SUPPORT_DXR"]) : onlyD3DMetal),
@@ -833,6 +833,6 @@ extension Bottle {
         ]
         lines.append(("vendor", p.vendorID.map(PerformanceSettings.hex) ?? "default",
                       d3dmetal ? (vars(["D3DM_VENDOR_ID"]).isEmpty ? "D3DMetal's own (0x1002)" : vars(["D3DM_VENDOR_ID"])) : onlyD3DMetal))
-        return lines.map { "  " + $0.0.padding(toLength: 12, withPad: " ", startingAt: 0) + $0.1.padding(toLength: 9, withPad: " ", startingAt: 0) + $0.2 }
+        return lines.map { "  " + $0.0.padding(toLength: 12, withPad: " ", startingAt: 0) + $0.1.padding(toLength: 13, withPad: " ", startingAt: 0) + $0.2 }
     }
 }

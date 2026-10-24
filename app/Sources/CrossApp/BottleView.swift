@@ -535,6 +535,7 @@ struct PerformanceBox: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 16) {
                     Picker("Sync", selection: setting(\.sync)) {
+                        Text("Automatic").tag(SyncMode.auto)
                         Text("ESync").tag(SyncMode.esync)
                         Text("MSync").tag(SyncMode.msync)
                     }
