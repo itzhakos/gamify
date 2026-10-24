@@ -2,6 +2,12 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **Update control in the toolbar** (2026-10-24, for 0.9.1): the update banner (top
+  `safeAreaInset`) was drawn under the unified toolbar on macOS 27, so 0.8 could not update
+  itself to 0.9 from the UI (the user saw clipped text and no button). Now a
+  `ToolbarItem(.primaryAction)` pull-down ("Gamify 0.9.1 available" > Install Now / Release
+  Notes / Later; progress and results in the same control). Four inset variants were tried on
+  a test copy with a fake feed and rejected; docs/updates.md "0.9.1".
 - **MSync by default** (2026-10-24, branch claude/msync-default, for 0.9): `performance.sync`
   gained `auto` (the default) = msync (`SyncMode.automatic`/`effective`); the block carries
   `"version": 2`, and a block without it that says `esync` (0.7/0.8 wrote their default into

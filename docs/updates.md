@@ -1,8 +1,11 @@
 # Auto-update (2026-10-17)
 
 Gamify checks for a new version on every launch (Settings > General can turn that off) and
-from **Gamify > Check for Updates…**. An available update shows as a banner at the top of the
-main window: *"Gamify 0.2 is available (2.1 MB). Install Now / Later"*. Install downloads,
+from **Gamify > Check for Updates…**. An available update shows as a pull-down button in the
+main window's toolbar, *"Gamify 0.9.1 available"*, whose menu holds the details and *Install
+Now / Release Notes / Later* (until 0.9 it was a banner in a top `safeAreaInset`, which
+macOS 27 drew under the unified toolbar: text clipped, Install Now unreachable; insets at the
+bottom of the split view or of a column broke the columns' layout, see 0.9.1 below). Install downloads,
 verifies, installs and relaunches the app. Nothing else is sent anywhere: the only network
 requests are one GET of `latest.json` and, when the user clicks Install, the GET of one asset.
 No analytics, no identifiers, no GitHub API calls.
@@ -75,7 +78,7 @@ Update decision in the app:
 The app cannot replace itself while running, so the last step happens in a **detached helper**
 (a `/bin/sh` script the updater writes next to the download and starts with `posix_spawn` in its
 own process group, so it survives the app quitting). Before quitting, the app does everything
-that can fail without touching the installed bundle, so errors show in the banner and the
+that can fail without touching the installed bundle, so errors show in the toolbar control and the
 installed app stays as it was:
 
 1. Download into `~/Library/Caches/Gamify/Updates/<version>/`, check size and SHA-256.
@@ -235,3 +238,23 @@ MSync by default (`performance.sync` `auto`, Performance.swift) changes only the
 was running; the `releases/latest/download/latest.json` redirect served 0.8 for about a minute
 after the publish, then 0.9.
 
+## 0.9.1 (2026-10-24): the update control moved into the toolbar
+
+On macOS 27 the update banner (`UpdateBanner`, a top `safeAreaInset` on the
+`NavigationSplitView`) was drawn under the unified toolbar: the user saw only the top of its
+text behind the title bar and could not click Install Now, so 0.8 could not update itself to
+0.9 from the UI (Settings > General > "Install updates automatically" + a relaunch still
+worked, as does the DMG). Tried and rejected, each checked on a test copy of the app
+(`app/build/Gamify.app` with its bundle id changed to `local.gamify.test`, launched with `open
+-n --env GAMIFY_UPDATE_FEED=http://127.0.0.1:8765/latest.json --env GAMIFY_UPDATE_FORCE=1`
+against a copy of `dist/release-0.9/latest.json` that says 0.9.1, screenshots through the
+desktop app's window capture): a top inset on the detail column (also under the toolbar), a
+`VStack` with the banner above the split view (same), a bottom inset on the split view (never
+shown), a bottom inset on the detail column or the sidebar (the columns' content was laid out
+taller than the window and clipped at the top). What works: a `ToolbarItem(placement:
+.primaryAction)` on the split view holding a `Menu` whose label is the short state ("Gamify
+0.9.1 available", "Downloading 0.9.1…" with a small progress bar, "Installing…", "Up to date",
+"Updated to 0.9.1", "Update problem") and whose items are the full text, then Install Now /
+Release Notes / Later, Cancel while downloading, OK otherwise. The window never changes
+layout for it. Not clicked through on screen (the menu cannot be opened in the background);
+the actions are the same `UpdateController` calls as before.

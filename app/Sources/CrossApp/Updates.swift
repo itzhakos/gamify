@@ -164,53 +164,52 @@ final class UpdateController: ObservableObject {
     }
 }
 
-/// The non-blocking banner at the top of the main window.
+/// The update control in the main window's toolbar (CrossApp.swift, `.primaryAction`): a
+/// pull-down button whose label shows the state ("Gamify 0.9 available", "Downloading… 40%",
+/// "Up to date") and whose menu holds the details and the actions (Install Now, Release
+/// Notes, Later / Cancel / OK). Never a modal, never a layout inset (see CrossApp.swift).
 struct UpdateBanner: View {
     @EnvironmentObject var updates: UpdateController
 
     var body: some View {
         if updates.bannerVisible, let content = content {
-            HStack(alignment: .center, spacing: 10) {
-                Image(systemName: content.icon)
-                    .font(.title3)
-                    .foregroundStyle(content.tint)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(content.title).fontWeight(.semibold)
-                    if let detail = content.detail {
-                        Text(detail).font(.caption).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .textSelection(.enabled)
-                    }
-                    if let progress = content.progress {
-                        ProgressView(value: progress).frame(maxWidth: 360)
-                    } else if content.spinner {
-                        ProgressView().controlSize(.small)
-                    }
+            Menu {
+                if let detail = content.detail {
+                    Text(detail)
+                    Divider()
                 }
-                Spacer()
                 buttons
+            } label: {
+                Label {
+                    HStack(spacing: 6) {
+                        if let progress = content.progress {
+                            ProgressView(value: progress).frame(width: 60)
+                        } else if content.spinner {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text(content.title)
+                    }
+                } icon: {
+                    Image(systemName: content.icon).foregroundStyle(content.tint)
+                }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(.bar)
-            .overlay(alignment: .bottom) { Divider() }
+            .labelStyle(.titleAndIcon)
+            .menuIndicator(.visible)
+            .help(content.help)
         }
     }
 
     @ViewBuilder private var buttons: some View {
         switch updates.phase {
         case .available(let update):
+            Button("Install Now") { updates.install() }
+                .help(HelpText.updateInstallNow)
             if let notes = update.manifest.notesURL {
                 Button("Release Notes") { NSWorkspace.shared.open(notes) }
-                    .buttonStyle(.link)
                     .help(HelpText.updateReleaseNotes)
             }
             Button("Later") { updates.later() }
                 .help(HelpText.updateLater)
-            // no .defaultAction: the banner is not modal, a stray Return must not install
-            Button("Install Now") { updates.install() }
-                .buttonStyle(.borderedProminent)
-                .help(HelpText.updateInstallNow)
         case .downloading:
             Button("Cancel") { updates.later() }
                 .help(HelpText.updateCancel)
@@ -224,10 +223,13 @@ struct UpdateBanner: View {
     private struct Content {
         var icon: String
         var tint: Color
+        /// Short, for the toolbar button.
         var title: String
+        /// The full sentences, shown at the top of the menu.
         var detail: String?
         var progress: Double?
         var spinner = false
+        var help: String { detail.map { "\(title). \($0)" } ?? title }
     }
 
     private var content: Content? {
@@ -235,30 +237,31 @@ struct UpdateBanner: View {
         case .idle:
             return nil
         case .checking:
-            return Content(icon: "arrow.triangle.2.circlepath", tint: .secondary, title: "Checking for updates…", spinner: true)
+            return Content(icon: "arrow.triangle.2.circlepath", tint: .secondary, title: "Checking…", spinner: true)
         case .upToDate(let version):
-            return Content(icon: "checkmark.circle", tint: .green, title: "Gamify \(version) is up to date.")
+            return Content(icon: "checkmark.circle", tint: .green, title: "Up to date", detail: "Gamify \(version) is the newest version.")
         case .available(let update):
             let what = update.kind == .app
                 ? "Downloads \(UpdateController.size(update.asset.size)), installs and restarts Gamify. Your bottles and games stay as they are."
                 : "Includes a new Wine runtime: downloads \(UpdateController.size(update.asset.size)), replaces the app and restarts it. Your bottles and games stay as they are."
             return Content(icon: "arrow.down.circle.fill", tint: .accentColor,
-                           title: "Gamify \(update.version) is available (\(UpdateController.size(update.asset.size))). You have \(updates.currentVersion).",
-                           detail: what)
+                           title: "Gamify \(update.version) available",
+                           detail: "Gamify \(update.version) is available (\(UpdateController.size(update.asset.size))). You have \(updates.currentVersion). \(what)")
         case .unsupported(let update, let minimum):
             return Content(icon: "exclamationmark.triangle", tint: .orange,
-                           title: "Gamify \(update.version) is available but needs macOS \(minimum) or later.")
+                           title: "Update needs macOS \(minimum)",
+                           detail: "Gamify \(update.version) is available but needs macOS \(minimum) or later.")
         case .downloading(let update, let received, let expected):
             let fraction = expected > 0 ? Double(received) / Double(expected) : 0
             return Content(icon: "arrow.down.circle", tint: .accentColor,
-                           title: "Downloading Gamify \(update.version)…",
-                           detail: "\(UpdateController.size(received)) of \(UpdateController.size(expected))",
+                           title: "Downloading \(update.version)…",
+                           detail: "Downloading Gamify \(update.version): \(UpdateController.size(received)) of \(UpdateController.size(expected)).",
                            progress: min(max(fraction, 0), 1))
         case .installing(let update, let step):
-            return Content(icon: "gearshape.2", tint: .accentColor, title: "Installing Gamify \(update.version)…",
-                           detail: step, spinner: true)
+            return Content(icon: "gearshape.2", tint: .accentColor, title: "Installing \(update.version)…",
+                           detail: "Installing Gamify \(update.version): \(step)", spinner: true)
         case .installed(let version):
-            return Content(icon: "checkmark.seal.fill", tint: .green, title: "Gamify was updated to \(version).")
+            return Content(icon: "checkmark.seal.fill", tint: .green, title: "Updated to \(version)", detail: "Gamify was updated to \(version).")
         case .failed(let message):
             return Content(icon: "xmark.octagon", tint: .red, title: "Update problem", detail: message)
         }

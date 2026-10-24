@@ -93,7 +93,7 @@ app/Sources/CrossApp/
   LogView.swift    NSTextView that tails the selected job's log file
   SettingsView.swift  General tab (tutorial), Environment tab (= `cross env`), Paths tab
   TutorialView.swift  first-run tutorial window (six steps, see below)
-  Updates.swift    UpdateController (launch check, Check for Updates…), the update banner,
+  Updates.swift    UpdateController (launch check, Check for Updates…), the toolbar's update pull-down,
                    Settings > General > Updates (docs/updates.md)
   HelpText.swift   every hover help (`.help`) text, by view (see "Hover help")
 ```
@@ -1306,10 +1306,11 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 | Reveal arrow in the location rows | Show in Finder |
 | Open Settings | Opens Gamify's settings: folders, updates and this tutorial. |
 
-### Updates.swift: UpdateBanner
+### Updates.swift: UpdateBanner (the toolbar's update pull-down since 0.9.1, docs/updates.md)
 
 | Control | Help text |
 |---|---|
+| The pull-down button itself | Its state and the full text ("Gamify 0.9.1 available. Gamify 0.9.1 is available (2.5 MB). You have 0.9. Downloads 2.5 MB, installs and restarts Gamify. …"). |
 | Release Notes | Opens what changed in this version in your browser. |
 | Later | Hides the notice. Gamify offers the update again on the next launch. |
 | Install Now | Downloads the update, installs it and restarts Gamify. Your bottles and games stay as they are. |

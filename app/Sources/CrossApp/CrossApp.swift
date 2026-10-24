@@ -160,9 +160,14 @@ struct ContentView: View {
                                        description: Text("Create one with the + button."))
             }
         }
-        // update available / progress / errors: a banner, never a modal
-        .safeAreaInset(edge: .top, spacing: 0) {
-            UpdateBanner()
+        // update available / progress / errors: a toolbar item, never a modal. Until 0.9 this
+        // was a banner in a top safeAreaInset, which macOS 27 drew under the unified toolbar
+        // (text clipped, Install Now unreachable); insets at the bottom of the split view or
+        // of a column broke the columns' layout. The toolbar is always visible.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                UpdateBanner()
+            }
         }
         .sheet(isPresented: $showingNewBottle) {
             NewBottleSheet()
