@@ -1,11 +1,25 @@
 import Foundation
 
 /// How Wine implements Windows synchronisation objects (events, mutexes, semaphores).
-/// Both keep them out of the wineserver round trip; msync uses Mach semaphores, esync
-/// file descriptors. Our wineserver supports both ("msync: up and running").
+/// Both keep them out of the wineserver round trip; msync uses Mach semaphores and ulock
+/// waits, esync file descriptors (on macOS: a pipe pair per object, polled with poll()).
+/// Our wineserver supports both ("msync: up and running"). `auto` is the default and
+/// resolves to msync (`SyncMode.automatic`): measured on Dishonored 2 (2026-10-24), esync
+/// put 36-57% of the game's CPU samples inside ntdll's wait path, msync 18%, and the
+/// frame drops went with it. CrossOver's own macOS default is msync too.
 public enum SyncMode: String, Codable, CaseIterable {
+    case auto
     case esync
     case msync
+
+    /// What `auto` means today.
+    public static let automatic: SyncMode = .msync
+
+    /// The mode a process really gets: never `auto`.
+    public var effective: SyncMode { self == .auto ? SyncMode.automatic : self }
+
+    /// "auto (msync)", "esync", "msync".
+    public var text: String { self == .auto ? "auto (\(effective.rawValue))" : rawValue }
 }
 
 /// Per-bottle performance settings, `performance` in cross.json. Every field has a
@@ -15,8 +29,13 @@ public enum SyncMode: String, Codable, CaseIterable {
 /// values through `Runtime.applyPerformance(to:)`. Everything applies to programs
 /// started afterwards.
 public struct PerformanceSettings: Codable, Equatable {
-    /// WINEESYNC=1 or WINEMSYNC=1 (exactly one).
-    public var sync: SyncMode = .esync
+    /// Format of the stored block. 1 (no `version` key): written by 0.7/0.8, whose default
+    /// sync was esync and which wrote every field, so an explicit "esync" there is the old
+    /// default, not a choice: it loads as `auto`. 2: `sync` is what the user picked.
+    public var version: Int = PerformanceSettings.currentVersion
+    public static let currentVersion = 2
+    /// WINEESYNC=1 or WINEMSYNC=1 (exactly one), from `sync.effective`.
+    public var sync: SyncMode = .auto
     /// D3DMetal: DLSS calls go to Apple's MetalFX bridge (nvngx.dll), the adapter reports an
     /// NVIDIA vendor id (Streamline-based games require NVIDIA). DXMT: DXMT_ENABLE_NVEXT=1
     /// (its own NGX shim -> MetalFX temporal scaler). wined3d/DXVK: no effect.
@@ -39,7 +58,10 @@ public struct PerformanceSettings: Codable, Equatable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        sync = try c.decodeIfPresent(SyncMode.self, forKey: .sync) ?? .esync
+        let stored = try c.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        sync = try c.decodeIfPresent(SyncMode.self, forKey: .sync) ?? .auto
+        if stored < 2 && sync == .esync { sync = .auto }   // 0.7/0.8 wrote their default
+        version = PerformanceSettings.currentVersion
         metalfx = try c.decodeIfPresent(Bool.self, forKey: .metalfx) ?? true
         avx = try c.decodeIfPresent(Bool.self, forKey: .avx) ?? false
         raytracing = try c.decodeIfPresent(Bool.self, forKey: .raytracing)
@@ -72,8 +94,8 @@ public struct PerformanceSettings: Codable, Equatable {
     public func environment(graphics: Graphics) -> [String: String?] {
         let d3dmetal = graphics == .d3dmetal
         var env: [String: String?] = [
-            "WINEESYNC": sync == .esync ? "1" : nil,
-            "WINEMSYNC": sync == .msync ? "1" : nil,
+            "WINEESYNC": sync.effective == .esync ? "1" : nil,
+            "WINEMSYNC": sync.effective == .msync ? "1" : nil,
             "ROSETTA_ADVERTISE_AVX": avx ? "1" : nil,
             "MTL_HUD_ENABLED": hud ? "1" : "0",
             "D3DM_ENABLE_METALFX": d3dmetal && metalfx ? "1" : nil,

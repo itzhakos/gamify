@@ -154,9 +154,10 @@ enum HelpText {
     // MARK: - BottleView: performance box
 
     static let perfSync = """
-        How Windows programs wait for each other. ESync works everywhere; MSync is sometimes \
-        faster in games. Switch only if a game stutters, and only while nothing runs in this \
-        bottle.
+        How Windows programs wait for each other. Automatic uses MSync, the fast native macOS \
+        way, which keeps games smoother (Dishonored 2 dropped frames on ESync and not on MSync). \
+        Pick ESync only if a program misbehaves on MSync, and change this only while nothing runs \
+        in this bottle; for Steam games, restart Steam afterwards.
         """
     static let perfMetalFX = """
         Games that offer DLSS in their settings get Apple's MetalFX upscaling instead, and \

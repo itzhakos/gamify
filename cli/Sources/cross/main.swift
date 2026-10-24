@@ -11,7 +11,7 @@ cross - bottle manager and launcher for the winecx runtimes
   cross bottle set <name> graphics <d3dmetal|wined3d|dxvk|dxmt>
                                            d3dmetal: DX11/12 (64-bit); dxvk: DX9/10/11 32+64-bit over
                                            MoltenVK (winecx-full); dxmt: DX10/11 32+64-bit on Metal
-  cross bottle set <name> sync esync|msync           Windows sync objects: esync (default) or msync
+  cross bottle set <name> sync auto|esync|msync      Windows sync objects: auto (default, = msync), esync or msync
   cross bottle set <name> metalfx on|off             DLSS through MetalFX (D3DMetal; default on)
   cross bottle set <name> avx on|off                 advertise AVX/AVX2 to games (ROSETTA_ADVERTISE_AVX)
   cross bottle set <name> raytracing on|off|default  DirectX ray tracing in D3DMetal (D3DM_SUPPORT_DXR)
@@ -247,7 +247,7 @@ func main() throws {
                 try Runtime.forBottle(bottle, project: project).checkGraphics(g)
                 bottle.config.graphics = g
             case "sync":
-                guard let mode = SyncMode(rawValue: value.lowercased()) else { fail("sync must be esync or msync, not '\(value)'") }
+                guard let mode = SyncMode(rawValue: value.lowercased()) else { fail("sync must be auto, esync or msync, not '\(value)'") }
                 bottle.config.performance.sync = mode
             case "metalfx", "dlss":
                 bottle.config.performance.metalfx = parseSwitch(value, key)
