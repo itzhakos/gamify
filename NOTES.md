@@ -174,7 +174,8 @@ What is live, in one place; everything below it is the chronological log (dead e
   runtime with the CrossOver 26.1 hacks, DXVK + DXMT backends; runtime-version
   winecx-full-b06c9dee8503, so installed copies take the full 575 MB DMG, not the app zip) and
   **0.8 on 2026-10-23** (hover help on every control, Debugging mode + Export Logs; same
-  runtime-version, so 0.7 users get the 2.5 MB app zip); a 0.1 installed from GitHub updated
+  runtime-version, so 0.7 users get the 2.5 MB app zip) and **0.9 on 2026-10-24** (MSync by
+  default, app zip again); a 0.1 installed from GitHub updated
   itself to 0.2. docs/updates.md.
 - **Repository**: https://github.com/itzhakos/gamify (private, since 2026-10-17). Sources, scripts
   and docs only; runtimes/bottles/downloads/upstream/dist are rebuilt locally (see README.md).

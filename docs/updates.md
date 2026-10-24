@@ -226,3 +226,12 @@ Hover help (`HelpText.swift`) and the Debugging box (`DebugView.swift`, CrossCor
 change only the app layer: `runtime-version` stayed `winecx-full-b06c9dee8503`, so an installed
 0.7 takes `Gamify-app-0.8.zip` (2.5 MB); older installs take the DMG. Published with
 `scripts/release.sh 0.8`.
+
+## 0.9 (2026-10-24): app-layer update
+
+MSync by default (`performance.sync` `auto`, Performance.swift) changes only the app layer:
+`runtime-version` stayed `winecx-full-b06c9dee8503`, so installed 0.7/0.8 copies take
+`Gamify-app-0.9.zip` (2.5 MB). Published with `scripts/release.sh 0.9` while the user's game
+was running; the `releases/latest/download/latest.json` redirect served 0.8 for about a minute
+after the publish, then 0.9.
+
