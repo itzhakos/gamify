@@ -427,6 +427,8 @@ struct BottleView: View {
     /// What a D3DMetal bottle does with what D3DMetal lacks (`BottleConfig.graphics32`,
     /// `graphics9`); disabled for the other backends, which cover it themselves. DXVK is only
     /// offered where the runtime has MoltenVK (or when the bottle already has it chosen).
+    /// Menu-style: two segmented pickers were wider than the Graphics picker and squeezed the
+    /// bottle name and path on the left into three lines at the default window width.
     private var fallbackPickers: some View {
         let d3dmetal = bottle.config.graphics == .d3dmetal
         let available = model.runtime(for: bottle)?.availableGraphics ?? []
@@ -436,7 +438,7 @@ struct BottleView: View {
                 ForEach(Graphics32.allCases.filter { $0 == .wined3d || available.contains($0.graphics) || $0 == bottle.config.graphics32 },
                         id: \.self) { g in Text(g.title).tag(g) }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .fixedSize()
             .help(d3dmetal ? HelpText.graphics32Picker : HelpText.fallbackPickerDisabled)
             Picker("DirectX 9 games", selection: Binding(get: { bottle.config.graphics9 },
@@ -444,11 +446,12 @@ struct BottleView: View {
                 ForEach(Graphics9.allCases.filter { $0 == .wined3d || available.contains($0.graphics) || $0 == bottle.config.graphics9 },
                         id: \.self) { g in Text(g.title).tag(g) }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .fixedSize()
             .help(d3dmetal ? HelpText.graphics9Picker : HelpText.fallbackPickerDisabled)
         }
         .font(.callout)
+        .controlSize(.small)
         .disabled(!d3dmetal)
     }
 

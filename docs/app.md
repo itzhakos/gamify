@@ -1503,7 +1503,9 @@ for D3DMetal bottles. `bottle create` prints `(winecx-full, d3dmetal, 32-bit dxm
 
 ### App
 Under the Graphics segmented picker in the bottle header: **32-bit games** (DXMT / DXVK / wined3d)
-and **DirectX 9 games** (DXVK / wined3d), segmented, disabled unless the bottle is D3DMetal, DXVK
+and **DirectX 9 games** (DXVK / wined3d), two small menu-style pickers side by side (segmented
+ones were wider than the Graphics picker and squeezed the bottle name and path into three lines
+at the default window width; checked on screen 2026-11-03), disabled unless the bottle is D3DMetal, DXVK
 listed only when the bottle's runtime has MoltenVK (or is already chosen). Each change goes through
 `AppModel.setGraphics32` / `setGraphics9`: save cross.json, reload, `applyPerformance` in the
 background (winemetal.dll, cache/dxvk), exactly like `setGraphics`. Tooltips in HelpText.swift
