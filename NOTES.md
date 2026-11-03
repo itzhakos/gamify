@@ -198,8 +198,9 @@ What is live, in one place; everything below it is the chronological log (dead e
   **0.8 on 2026-10-23** (hover help on every control, Debugging mode + Export Logs; same
   runtime-version, so 0.7 users get the 2.5 MB app zip) and **0.9 on 2026-10-24** (MSync by
   default, app zip again) and **0.9.1 the same evening** (update control in the toolbar, because
-  0.8's banner was unreachable on macOS 27; app zip); a 0.1 installed from GitHub updated
-  itself to 0.2. docs/updates.md.
+  0.8's banner was unreachable on macOS 27; app zip) and **0.10 on 2026-11-03** (32-bit DirectX
+  10/11 on DXMT, DirectX 9 optionally on DXVK, for Ori on the user's M1 MacBook; app zip, 2.5 MB);
+  a 0.1 installed from GitHub updated itself to 0.2. docs/updates.md.
 - **Repository**: https://github.com/itzhakos/gamify (private, since 2026-10-17). Sources, scripts
   and docs only; runtimes/bottles/downloads/upstream/dist are rebuilt locally (see README.md).
 - **Docs**: README.md, docs/app.md, docs/packaging.md, docs/runtime-full.md, docs/d3dmetal3.md, docs/perf-research.md,

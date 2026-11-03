@@ -258,3 +258,15 @@ taller than the window and clipped at the top). What works: a `ToolbarItem(place
 Release Notes / Later, Cancel while downloading, OK otherwise. The window never changes
 layout for it. Not clicked through on screen (the menu cannot be opened in the background);
 the actions are the same `UpdateController` calls as before.
+
+## 0.10 (2026-11-03): app-layer update
+
+32-bit DirectX 10/11 games of a D3DMetal bottle go to DXMT, DirectX 9 optionally to DXVK
+(`graphics32` / `graphics9`, docs/app.md "32-bit DirectX and DirectX 9 games"): CrossCore, the
+CLI and the app only, so `runtime-version` stayed `winecx-full-b06c9dee8503` and installed
+0.7-0.9.1 copies take `Gamify-app-0.10.zip` (2.5 MB); the DMG (572 MB) already carried
+`runtimes/dxmt` and `runtimes/dxvk` with their i386 DLLs since 0.7. Published with
+`scripts/release.sh 0.10` (RELEASE_NOTES = the feature in three sentences); as with 0.9, the
+`releases/latest/download/latest.json` redirect still served 0.9.1 right after the publish.
+Trigger: Ori and the Blind Forest DE (32-bit) on the user's M1 MacBook Pro; not yet confirmed
+there.
