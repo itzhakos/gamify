@@ -148,11 +148,19 @@ public struct Runtime {
         env["WINECX_GRAPHICS"] = graphics.rawValue
         // Every backend: <backend>:lib/wined3d:lib/wine. ntdll searches lib/wine first, so
         // the build moves Wine's d3d9/d3d10*/d3d11/d3d12/dxgi (both arches) to lib/wined3d,
-        // the fallback for what a backend lacks (D3DMetal: all of i386 and d3d9).
+        // the fallback for what a backend lacks (D3DMetal: all of i386 and d3d9). D3DMetal
+        // bottles put their 32-bit and DirectX 9 backends in between (`d3dmetalFallbacks`;
+        // by default d3dmetal:dxmt:lib/wined3d:lib/wine, with graphics9 dxvk
+        // d3dmetal:dxmt:dxvk:...) and export what each got.
         try checkGraphics(graphics)
-        var dllPath = [wined3dDir.path, dllDir.path]
+        let fallbacks = try d3dmetalFallbacks(for: bottle, graphics: graphics, base: base)
+        var dllPath = fallbacks.backends.map { graphicsDir($0).path } + [wined3dDir.path, dllDir.path]
         if graphics != .wined3d { dllPath.insert(graphicsDir(graphics).path, at: 0) }
         env["WINEDLLPATH"] = dllPath.joined(separator: ":")
+        if graphics == .d3dmetal {
+            env["WINECX_GRAPHICS32"] = fallbacks.dx32.rawValue
+            env["WINECX_GRAPHICS9"] = fallbacks.dx9.rawValue
+        }
         // CW HACK 22434: ntdll dlopens this (lazily, on the first native PE load) and
         // registers D3DMetal's JIT code regions with Rosetta. D3DMetal only.
         if graphics == .d3dmetal {
@@ -161,6 +169,9 @@ public struct Runtime {
             env.removeValue(forKey: "CX_APPLEGPTK_LIBD3DSHARED_PATH")
         }
         for (key, value) in backendEnvironment(graphics, bottle: bottle, base: base) { env[key] = value }
+        for fallback in fallbacks.backends {
+            for (key, value) in backendEnvironment(fallback, bottle: bottle, base: base) { env[key] = value }
+        }
         // gnutls/freetype are dlopened by leaf name and the D3DMetal .so files reference
         // @rpath/libd3dshared.dylib + D3DMetal.framework.
         env["DYLD_FALLBACK_LIBRARY_PATH"] = [

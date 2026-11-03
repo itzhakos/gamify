@@ -8,10 +8,28 @@ enum HelpText {
     // MARK: - BottleView: header
 
     static let graphicsPicker = """
-        Which translation layer draws the game. D3DMetal (default) handles DirectX 11 and 12 \
-        games. wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for \
-        DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). \
-        Applies to programs started afterwards; for Steam games, restart Steam.
+        Which translation layer draws the game. D3DMetal (default) handles 64-bit DirectX 11 and \
+        12 games; 32-bit and DirectX 9 games go to the two choices below. wined3d is Wine's own, \
+        slower renderer. DXVK and DXMT are alternatives for DirectX 9/10/11 games that misbehave \
+        on D3DMetal (DXVK needs the winecx-full runtime). Applies to programs started afterwards; \
+        for Steam games, restart Steam.
+        """
+    static let graphics32Picker = """
+        Who draws 32-bit DirectX 10 and 11 games, which D3DMetal cannot run (it is 64-bit only). \
+        DXMT (default) draws them directly on Metal. DXVK goes through Vulkan and needs the \
+        winecx-full runtime. wined3d is Wine's own, much slower renderer. Applies to programs \
+        started afterwards; for Steam games, restart Steam.
+        """
+    static let graphics9Picker = """
+        Who draws DirectX 9 games, which D3DMetal does not support at all (32- and 64-bit). \
+        wined3d (default) is Wine's own renderer. DXVK draws them through Vulkan on Metal \
+        instead; try it when a DirectX 9 game runs badly, though some effects can be missing. It \
+        needs the winecx-full runtime. Applies to programs started afterwards; for Steam games, \
+        restart Steam.
+        """
+    static let fallbackPickerDisabled = """
+        Only for D3DMetal bottles: the other graphics choices draw 32-bit and DirectX 9 games \
+        themselves.
         """
     static let showC = """
         Opens this bottle's C: drive in Finder, where its programs and save files live.
@@ -256,10 +274,11 @@ enum HelpText {
         support (needed for DXVK); winecx is the plain build. Cannot be changed later.
         """
     static let newBottleGraphics = """
-        Which translation layer draws the game. D3DMetal (default) handles DirectX 11 and 12 \
-        games. wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for \
-        DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). \
-        You can change this later on the bottle page.
+        Which translation layer draws the game. D3DMetal (default) handles 64-bit DirectX 11 and \
+        12 games; 32-bit DirectX 10/11 games go to DXMT (changeable on the bottle page, like \
+        DirectX 9). wined3d is Wine's own, slower renderer. DXVK and DXMT are \
+        alternatives for DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the \
+        winecx-full runtime). You can change this later on the bottle page.
         """
     static let newBottleLocation = """
         Where the bottle's files are kept: Gamify's bottles folder on this Mac, or a folder \

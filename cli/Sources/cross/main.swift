@@ -5,12 +5,20 @@ let usage = """
 cross - bottle manager and launcher for the winecx runtimes
 
   cross bottle create <name> [--runtime winecx|winecx-full] [--graphics d3dmetal|wined3d|dxvk|dxmt]
+                           [--graphics32 dxmt|dxvk|wined3d] [--graphics9 dxvk|wined3d]
                            [--storage <GB>|unlimited] [--location <folder>|default]
   cross bottle list
   cross bottle show <name>                 settings of one bottle (runtime, graphics, disk, performance)
   cross bottle set <name> graphics <d3dmetal|wined3d|dxvk|dxmt>
                                            d3dmetal: DX11/12 (64-bit); dxvk: DX9/10/11 32+64-bit over
                                            MoltenVK (winecx-full); dxmt: DX10/11 32+64-bit on Metal
+  cross bottle set <name> graphics32 <dxmt|dxvk|wined3d>
+                                           D3DMetal bottles: 32-bit DX10/11 programs (D3DMetal is
+                                           64-bit only) go to dxmt (default), dxvk (winecx-full)
+                                           or wined3d (Wine's own renderer)
+  cross bottle set <name> graphics9 <dxvk|wined3d>
+                                           D3DMetal bottles: DX9 programs, 32+64-bit (D3DMetal has
+                                           no DX9), go to wined3d (default) or dxvk (winecx-full)
   cross bottle set <name> sync auto|esync|msync      Windows sync objects: auto (default, = msync), esync or msync
   cross bottle set <name> metalfx on|off             DLSS through MetalFX (D3DMetal; default on)
   cross bottle set <name> avx on|off                 advertise AVX/AVX2 to games (ROSETTA_ADVERTISE_AVX)
@@ -167,6 +175,7 @@ func main() throws {
             var config = BottleConfig(runtime: Runtime.preferred(in: project))
             var storageGB: Int?? = nil   // nil: not given, the default for the location
             var location: URL? = nil
+            var explicitFallbacks: [Graphics] = []   // from --graphics32/--graphics9: must run here
             var i = 2
             while i < args.count {
                 switch args[i] {
@@ -176,6 +185,14 @@ func main() throws {
                     let g = requireArg(args, i + 1, "graphics")
                     guard let graphics = Graphics(rawValue: g) else { fail("unknown graphics '\(g)' (\(Graphics.list))") }
                     config.graphics = graphics; i += 2
+                case "--graphics32":
+                    let g = requireArg(args, i + 1, "graphics32")
+                    guard let graphics32 = Graphics32(rawValue: g) else { fail("unknown graphics32 '\(g)' (\(Graphics32.list))") }
+                    config.graphics32 = graphics32; explicitFallbacks.append(graphics32.graphics); i += 2
+                case "--graphics9":
+                    let g = requireArg(args, i + 1, "graphics9")
+                    guard let graphics9 = Graphics9(rawValue: g) else { fail("unknown graphics9 '\(g)' (\(Graphics9.list))") }
+                    config.graphics9 = graphics9; explicitFallbacks.append(graphics9.graphics); i += 2
                 case "--storage":
                     storageGB = .some(parseStorage(requireArg(args, i + 1, "storage size"))); i += 2
                 case "--location":
@@ -187,6 +204,9 @@ func main() throws {
                 fail("unknown runtime '\(config.runtime)' (\(Runtime.known.joined(separator: "|")))")
             }
             let runtime = Runtime(project: project, name: config.runtime)
+            if config.graphics == .d3dmetal {
+                for g in explicitFallbacks where g != .wined3d { try runtime.checkGraphics(g) }
+            }
             let home = try runtime.checkLocation(location)
             let sizeGB: Int? = storageGB ?? Runtime.defaultStorageGB(project: project, home: home)
             let bottle = try runtime.createBottle(name: name, config: config, storageGB: sizeGB, location: home)
@@ -194,7 +214,9 @@ func main() throws {
             guard status == 0 else { fail("wineboot --init failed with status \(status)") }
             for line in try runtime.applyPerformance(to: bottle) { print(line) }
             let storage = sizeGB.map { "\($0) GB disk image" } ?? "folder"
-            print("bottle '\(name)' (\(config.runtime), \(config.graphics.rawValue), \(storage)) ready at \(bottle.location?.path ?? bottle.prefix.path)")
+            let fallbacks = config.graphics == .d3dmetal
+                ? ", 32-bit \(config.graphics32.rawValue), DX9 \(config.graphics9.rawValue)" : ""
+            print("bottle '\(name)' (\(config.runtime), \(config.graphics.rawValue)\(fallbacks), \(storage)) ready at \(bottle.location?.path ?? bottle.prefix.path)")
 
         case "list":
             for b in try Bottle.list(in: project) {
@@ -246,6 +268,14 @@ func main() throws {
                 guard let g = Graphics(rawValue: value) else { fail("unknown graphics '\(value)' (\(Graphics.list))") }
                 try Runtime.forBottle(bottle, project: project).checkGraphics(g)
                 bottle.config.graphics = g
+            case "graphics32":
+                guard let g = Graphics32(rawValue: value.lowercased()) else { fail("unknown graphics32 '\(value)' (\(Graphics32.list))") }
+                try Runtime.forBottle(bottle, project: project).checkGraphics(g.graphics)
+                bottle.config.graphics32 = g
+            case "graphics9":
+                guard let g = Graphics9(rawValue: value.lowercased()) else { fail("unknown graphics9 '\(value)' (\(Graphics9.list))") }
+                try Runtime.forBottle(bottle, project: project).checkGraphics(g.graphics)
+                bottle.config.graphics9 = g
             case "sync":
                 guard let mode = SyncMode(rawValue: value.lowercased()) else { fail("sync must be auto, esync or msync, not '\(value)'") }
                 bottle.config.performance.sync = mode
@@ -275,12 +305,19 @@ func main() throws {
                     guard let id = PerformanceSettings.parseVendorID(value) else { fail("vendor must be a hex id like 0x10DE or default, not '\(value)'") }
                     bottle.config.performance.vendorID = id
                 }
-            default: fail("unknown setting '\(key)' (graphics, storage, location, sync, metalfx, avx, raytracing, maxfps, hud, retina, vendor, debug)")
+            default: fail("unknown setting '\(key)' (graphics, graphics32, graphics9, storage, location, sync, metalfx, avx, raytracing, maxfps, hud, retina, vendor, debug)")
             }
             try bottle.saveConfig()
             print("\(name): \(key) = \(value)")
-            // files and registry values (nvngx.dll, NGXCore, RetinaMode); env vars need nothing
-            if ["graphics", "metalfx", "dlss", "retina"].contains(key.lowercased()) {
+            if ["graphics32", "graphics9"].contains(key.lowercased()) {
+                if bottle.config.graphics != .d3dmetal {
+                    print("\(name): \(key.lowercased()) only matters for D3DMetal bottles; \(bottle.config.graphics.title) covers 32-bit and DirectX 9 programs itself")
+                } else {
+                    bottle.fallbackLines(in: project).forEach { print("\(name):\($0.dropFirst(1))") }
+                }
+            }
+            // files and registry values (nvngx.dll, NGXCore, RetinaMode, winemetal.dll, cache/dxvk); env vars need nothing
+            if ["graphics", "graphics32", "graphics9", "metalfx", "dlss", "retina"].contains(key.lowercased()) {
                 let runtime = try Runtime.forBottle(bottle, project: project)
                 for line in try runtime.applyPerformance(to: bottle, force: true) { print("\(name): \(line)") }
             }

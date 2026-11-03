@@ -157,6 +157,25 @@ extension Runtime {
         return g
     }
 
+    /// What a D3DMetal bottle does with 32-bit DirectX 10/11 (WINECX_GRAPHICS32 wins over
+    /// cross.json, like WINECX_GRAPHICS). `d3dmetalFallbacks` says what is really used.
+    public func graphics32(for bottle: Bottle, base: [String: String] = ProcessInfo.processInfo.environment) throws -> Graphics32 {
+        guard let override = base["WINECX_GRAPHICS32"], !override.isEmpty else { return bottle.config.graphics32 }
+        guard let g = Graphics32(rawValue: override) else {
+            throw CrossError("unknown WINECX_GRAPHICS32='\(override)' (\(Graphics32.list))")
+        }
+        return g
+    }
+
+    /// What a D3DMetal bottle does with DirectX 9 (WINECX_GRAPHICS9 wins over cross.json).
+    public func graphics9(for bottle: Bottle, base: [String: String] = ProcessInfo.processInfo.environment) throws -> Graphics9 {
+        guard let override = base["WINECX_GRAPHICS9"], !override.isEmpty else { return bottle.config.graphics9 }
+        guard let g = Graphics9(rawValue: override) else {
+            throw CrossError("unknown WINECX_GRAPHICS9='\(override)' (\(Graphics9.list))")
+        }
+        return g
+    }
+
     /// Puts in place what the bottle's performance settings need beyond environment
     /// variables: with MetalFX on (D3DMetal bottles) the runtime's nvngx names,
     /// nvngx.dll + nvapi64.dll in system32 and NGXCore\FullPath; and RetinaMode.
@@ -178,6 +197,9 @@ extension Runtime {
         var values: [Store.RegistryValue] = []
         let graphics = try graphics(for: bottle, base: base)
         done += try prepareBackend(graphics, bottle: bottle)
+        for fallback in try d3dmetalFallbacks(for: bottle, graphics: graphics, base: base).backends {
+            done += try prepareBackend(fallback, bottle: bottle, afterD3DMetal: true)
+        }
         if graphics == .d3dmetal && perf.metalfx {
             do {
                 done += try ensureNVNGXNames()

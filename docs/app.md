@@ -1033,7 +1033,7 @@ Four backends per bottle (`graphics` in cross.json, `cross bottle set <name> gra
 
 | Backend | Covers | Folder | Notes |
 |---|---|---|---|
-| `d3dmetal` (default) | DX11/DX12, 64-bit; DX9 and 32-bit fall back to wined3d | `runtimes/d3dmetal` | DLSS -> MetalFX (Performance settings) |
+| `d3dmetal` (default) | DX11/DX12, 64-bit; since 0.10 32-bit DX10/11 go to DXMT and DX9 to wined3d by default (`graphics32`/`graphics9`, "32-bit DirectX and DirectX 9 games" below) | `runtimes/d3dmetal` | DLSS -> MetalFX (Performance settings) |
 | `wined3d` | Wine's own d3d9/d3d10*/d3d11/d3d12/dxgi (Vulkan renderer over MoltenVK on winecx-full, FL 9_3) | `<runtime>/lib/wined3d` | |
 | `dxvk` | DX9/10/11, 32- and 64-bit, over MoltenVK | `runtimes/dxvk` | winecx-full bottles only (refused on winecx: "DXVK needs Vulkan") |
 | `dxmt` | DX10/11, 32- and 64-bit, directly on Metal | `runtimes/dxmt` | `metalfx` on -> `DXMT_ENABLE_NVEXT=1` (DLSS -> MetalFX temporal scaler, 64-bit) |
@@ -1088,7 +1088,10 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 
 | Control | Help text |
 |---|---|
-| Graphics picker | Which translation layer draws the game. D3DMetal (default) handles DirectX 11 and 12 games. wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). Applies to programs started afterwards; for Steam games, restart Steam. |
+| Graphics picker | Which translation layer draws the game. D3DMetal (default) handles 64-bit DirectX 11 and 12 games; 32-bit and DirectX 9 games go to the two choices below. wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). Applies to programs started afterwards; for Steam games, restart Steam. |
+| 32-bit games picker (D3DMetal bottle) | Who draws 32-bit DirectX 10 and 11 games, which D3DMetal cannot run (it is 64-bit only). DXMT (default) draws them directly on Metal. DXVK goes through Vulkan and needs the winecx-full runtime. wined3d is Wine's own, much slower renderer. Applies to programs started afterwards; for Steam games, restart Steam. |
+| DirectX 9 games picker (D3DMetal bottle) | Who draws DirectX 9 games, which D3DMetal does not support at all (32- and 64-bit). wined3d (default) is Wine's own renderer. DXVK draws them through Vulkan on Metal instead; try it when a DirectX 9 game runs badly, though some effects can be missing. It needs the winecx-full runtime. Applies to programs started afterwards; for Steam games, restart Steam. |
+| 32-bit games / DirectX 9 games pickers (disabled, other backend) | Only for D3DMetal bottles: the other graphics choices draw 32-bit and DirectX 9 games themselves. |
 | Show C: | Opens this bottle's C: drive in Finder, where its programs and save files live. |
 
 ### BottleView.swift: actions box
@@ -1207,7 +1210,7 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 |---|---|
 | Name field | The bottle's name, also the name of its folder. Cannot start with a dot or contain a slash. |
 | Runtime picker (more than one runtime) | Which Wine build the bottle uses. winecx-full adds video playback, SDL2 and Vulkan support (needed for DXVK); winecx is the plain build. Cannot be changed later. |
-| Graphics | Which translation layer draws the game. D3DMetal (default) handles DirectX 11 and 12 games. wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). You can change this later on the bottle page. |
+| Graphics | Which translation layer draws the game. D3DMetal (default) handles 64-bit DirectX 11 and 12 games; 32-bit DirectX 10/11 games go to DXMT (changeable on the bottle page, like DirectX 9). wined3d is Wine's own, slower renderer. DXVK and DXMT are alternatives for DirectX 9/10/11 games that misbehave on D3DMetal (DXVK needs the winecx-full runtime). You can change this later on the bottle page. |
 | Location picker | Where the bottle's files are kept: Gamify's bottles folder on this Mac, or a folder you choose, e.g. on an external drive. |
 | Choose… (location) | Picks a folder, e.g. on an external SSD, to keep the bottle there. It runs from there while the drive is connected. |
 | Disk | Its own disk: a virtual disk of a fixed size, so the bottle can never take more; the image only takes the space actually used. Unlimited: a plain folder that grows as needed (not possible on exFAT drives). |
@@ -1425,3 +1428,130 @@ line "Send the zip when you report a problem." Every control has a `.help` toolt
   declined, so the box, the save panel and Reveal in Finder were not seen or clicked.
 - Not tested: `steam-check.txt`/`steam-games.txt` on a bottle with Steam (the scratch bottle
   has none; the user's bottles were not touched), a real crash, a real frozen game.
+
+## 32-bit DirectX and DirectX 9 games (2026-11-03)
+Why: D3DMetal 3.0 ships only `x86_64-windows`/`x86_64-unix` and no `d3d9.dll`, and ntdll takes each
+DLL from the first WINEDLLPATH entry that has `<entry>/<arch>-windows/<dll>.dll`. So in a D3DMetal
+bottle (the default) every 32-bit DirectX 10/11 game and every DirectX 9 game silently fell
+through to `lib/wined3d`: Wine's own renderer, feature level 9_3 (Vulkan renderer, winecx-full) or
+10_1 behind a fake "NVIDIA GeForce 8800 GTX" (OpenGL, winecx). That is why Ori and the Blind Forest:
+Definitive Edition (Unity 5.3, 32-bit `OriDE.exe`, D3D11) ran badly on the user's M1 MacBook Pro.
+Code: CrossCore `Bottle.swift` (`Graphics32`, `Graphics9`), `Backends.swift`
+(`Runtime.d3dmetalFallbacks`), `Runtime.environment(for:)`, `Performance.swift` (`graphics32(for:)`,
+`graphics9(for:)`, `applyPerformance`); `cross bottle set ... graphics32|graphics9`; two pickers
+under the Graphics picker; `scripts/winecx-env.sh`.
+
+### Design
+- Two per-bottle settings, only used when `graphics` is `d3dmetal` (the other backends cover both
+  arches and DX9 themselves, so their environment is byte-for-byte what it was):
+  `graphics32` (`dxmt` default, `dxvk`, `wined3d`) for 32-bit DirectX 10/11, and `graphics9`
+  (`wined3d` default, `dxvk`) for DirectX 9 of both arches. Stored as `"graphics32"` and
+  `"graphics9"` in cross.json; a file without them loads with the defaults, older apps ignore them.
+- The chosen backends' folders go between D3DMetal's and `lib/wined3d`: first the 32-bit choice,
+  then DXVK for DirectX 9 unless it is already there. D3DMetal has no `i386-windows`, so 32-bit
+  processes skip it; its `x86_64-windows` has every 64-bit DLL DXMT and DXVK have except `d3d9.dll`
+  (and `winemetal.dll`, which only DXMT's dxgi loads), so 64-bit DirectX 10/11/12 programs still get
+  D3DMetal. A folder serves every DLL it has: DXVK's has `d3d9` and `d3d10core`/`d3d11`/`dxgi`, so
+  `graphics32 dxvk` also brings DirectX 9 to DXVK, and `graphics9 dxvk` with `graphics32 wined3d`
+  also brings 32-bit DX10/11 to DXVK. `bottle show` and the exported `WINECX_GRAPHICS32` /
+  `WINECX_GRAPHICS9` say what programs really get.
+- A choice that cannot run (DXVK on a runtime without MoltenVK, a backend that is not built) is
+  left out, so its programs get wined3d, with one `cross: ... falls back to wined3d: ...` warning
+  per process. `cross bottle set` and `cross bottle create --graphics32/--graphics9` refuse such a
+  choice up front, like `set graphics dxvk` on winecx; the app only offers DXVK on runtimes with
+  MoltenVK.
+- `WINECX_GRAPHICS32` / `WINECX_GRAPHICS9` in the caller's environment win over cross.json, as
+  `WINECX_GRAPHICS` does (an unknown value is an error).
+- Why `graphics9` defaults to wined3d: the main session's d3d9test runs on DXVK were clean (below),
+  so it was meant to default to DXVK if a real D3D9 game renders on it. Portal 2 (32-bit D3D9, the
+  checkout's `bottles/steamtest`, Steam started from a shell with `runtimes/dxvk` after D3DMetal,
+  DXVK cache and log in a scratch folder, nothing in the bottle changed) **started on DXVK**:
+  `portal2_d3d9.log` "DXVK: v1.10.3 ... Apple M4 Max", a 3440x1440 swap chain, window "PORTAL 2 -
+  Direct3D 9" (DXVK's dxgi was loaded too). But MoltenVK failed to compile 6 of its pipelines
+  (`program_source:246:88: error: use of undeclared identifier 's0_2d_shadowSmplr'`,
+  `VK_ERROR_INITIALIZATION_FAILED: Shader library compile failed`: the shadow-sampler variants,
+  so those draws are dropped), and the Mac's screen was locked for the whole test, so window
+  captures stayed black (also Steam's own page area) and the menu and a map could not be seen.
+  Until a D3D9 game is seen rendering correctly, DXVK for DirectX 9 is opt-in. Flipping the
+  default is `Graphics9.standard` plus the texts (HelpText, usage, this section).
+
+### Mapping
+
+| Setting (cross.json) | Value | WINEDLLPATH (D3DMetal bottle; `<rt>` = `runtimes/<runtime>`) | Extra environment | Files (`prepareBackend`) |
+|---|---|---|---|---|
+| `graphics32` | `dxmt` (default) | `runtimes/d3dmetal:runtimes/dxmt:<rt>/lib/wined3d:<rt>/lib/wine` | `DXMT_CONFIG_FILE=runtimes/dxmt/dxmt.conf` | `winemetal.dll` into `system32` (x86_64) and `syswow64` (i386) when missing; not DXMT's nvapi64/nvngx (D3DMetal has its own) |
+| `graphics32` | `dxvk` | `runtimes/d3dmetal:runtimes/dxvk:...` (DX9 goes to DXVK too) | `DXVK_CONFIG_FILE`, `DXVK_STATE_CACHE_PATH` = `DXVK_LOG_PATH` = `<prefix>/cache/dxvk`, `WINEDLLOVERRIDES` += `vulkan-1=b` | `cache/dxvk` |
+| `graphics32` | `wined3d` | `runtimes/d3dmetal:<rt>/lib/wined3d:<rt>/lib/wine` (before 0.10) | | |
+| `graphics9` | `wined3d` (default) | nothing added | | |
+| `graphics9` | `dxvk` | `runtimes/dxvk` after the 32-bit choice, e.g. `runtimes/d3dmetal:runtimes/dxmt:runtimes/dxvk:...` | DXVK's, as above | `cache/dxvk` |
+
+Everything D3DMetal needs stays (`CX_APPLEGPTK_LIBD3DSHARED_PATH`, `D3DM_*`, `DYLD_FALLBACK_*`,
+`WINECX_GRAPHICS=d3dmetal`); D3DMetal bottles also get `WINECX_GRAPHICS32` / `WINECX_GRAPHICS9`
+(the effective values). New D3DMetal bottles get `winemetal.dll` from wineboot itself (it copies
+what is in WINEDLLPATH); existing ones get it from `applyPerformance` before their next launch.
+
+### CLI
+```
+cross bottle create <name> ... [--graphics32 dxmt|dxvk|wined3d] [--graphics9 dxvk|wined3d]
+cross bottle set <name> graphics32 dxmt|dxvk|wined3d
+cross bottle set <name> graphics9 dxvk|wined3d
+cross bottle show <name>      graphics32 / graphics9 lines: the choice and what those programs get
+```
+`set graphics32|graphics9` prints the two `bottle show` lines and runs `applyPerformance(force:)`
+like `set graphics`; on a bottle that is not D3DMetal it saves the value and says it only matters
+for D3DMetal bottles. `bottle create` prints `(winecx-full, d3dmetal, 32-bit dxmt, DX9 wined3d, ...)`.
+
+### App
+Under the Graphics segmented picker in the bottle header: **32-bit games** (DXMT / DXVK / wined3d)
+and **DirectX 9 games** (DXVK / wined3d), segmented, disabled unless the bottle is D3DMetal, DXVK
+listed only when the bottle's runtime has MoltenVK (or is already chosen). Each change goes through
+`AppModel.setGraphics32` / `setGraphics9`: save cross.json, reload, `applyPerformance` in the
+background (winemetal.dll, cache/dxvk), exactly like `setGraphics`. Tooltips in HelpText.swift
+(`graphics32Picker`, `graphics9Picker`, `fallbackPickerDisabled`), listed under Hover help; the
+Graphics and New Bottle texts now say where 32-bit and DirectX 9 games go.
+
+### Verified (2026-11-03, M4 Max, macOS 27.2, CROSS_BOTTLES in the session scratchpad, runtimes from the checkout)
+`cross run <bottle> <exe> 120 1` with `src/d3dtest/d3d11test.exe` (64-bit), `src/d3dtest32/d3d11test32.exe`,
+`src/d3d9test/d3d9test.exe` (32-bit) and `d3d9test64.exe`; "before" = the CLI built from main in the
+same bottle.
+
+| bottle `t` (winecx-full, d3dmetal) | d3d11test (64-bit) | d3d11test32 | d3d9test (32-bit) | d3d9test64 |
+|---|---|---|---|---|
+| before (main) | (unchanged) | Apple M4 Max (vendor 0x106b device 0x1b020209 vram 4095 MB), FL 0x9300 = wined3d Vulkan, 122.7 fps | NVIDIA GeForce 8800 GTX (driver nvd3dum.dll, vendor 0x10de device 0x0191), 120 frames in 60 ms (vsync ignored) = wined3d GL | |
+| defaults (dxmt, wined3d) | AMD Compatibility Mode (vendor 0x10de device 0x66af vram 53084 MB), FL 0xb000, 119.9 fps = D3DMetal | **Apple M4 Max (vendor 0x106b device 0x0000 vram 1966 MB), FL 0xb000**, 122.4 fps = DXMT | GeForce 8800 GTX, 2000 fps = wined3d | GeForce 8800 GTX, 2181.8 fps |
+| `graphics32 wined3d` | | FL 0x9300 (vram 4095 MB), 120.8 fps = wined3d | | |
+| `graphics32 dxvk` | | Apple M4 Max (vram 3072 MB), FL 0xb000, 121.8 fps = DXVK | Apple M4 Max (driver nvd3dum.dll, vendor 0x106b device 0x1b020209), 119.4 fps = DXVK | |
+| `graphics32 dxmt` + `graphics9 dxvk` | AMD Compatibility Mode, FL 0xb000, 120.0 fps | Apple M4 Max (device 0x0000, vram 1966 MB), FL 0xb000, 123.0 fps = DXMT | Apple M4 Max (driver nvd3dum.dll ...), 118.1 fps = DXVK | Apple M4 Max, 119.2 fps = DXVK |
+
+- Bottle `p` (winecx, d3dmetal): before, d3d11test32 got "NVIDIA GeForce 8800 GTX (vendor 0x10de
+  device 0x0191 vram 4095 MB)" FL 0xa100 at 3157.9 fps (wined3d GL); now "Apple M4 Max (vendor 0x106b
+  device 0x0000 vram 1966 MB)" FL 0xb000, 123.3 fps (DXMT also works on plain winecx); d3d11test
+  D3DMetal, d3d9 wined3d unchanged. `set p graphics9 dxvk` and `set w graphics32 dxvk` are refused
+  ("DXVK needs Vulkan (MoltenVK), which the 'winecx' runtime does not have; use a winecx-full bottle").
+- `cross bottle create t --runtime winecx-full --graphics d3dmetal --storage unlimited` (16 s):
+  `system32/winemetal.dll` and `syswow64/winemetal.dll` (identical to `runtimes/dxmt/i386-windows`)
+  present; cross.json has `"graphics32" : "dxmt"`, `"graphics9" : "wined3d"`. Pre-launch repair
+  (the path an existing D3DMetal bottle takes): with both `winemetal.dll` deleted from bottle `p`,
+  the next `cross run p d3d11test32.exe` put them back and ran on DXMT (FL 0xb000, 123.1 fps).
+- `cross env --export` of wined3d, dxvk and dxmt bottles on both runtimes (cross.json files without
+  the new keys), built from main and from this branch: identical. D3DMetal bottles differ by exactly
+  `DXMT_CONFIG_FILE`, `WINECX_GRAPHICS32=dxmt`, `WINECX_GRAPHICS9=wined3d` and the dxmt entry. All 6
+  `WINECX_GRAPHICS32`/`WINECX_GRAPHICS9` combinations on both runtimes give the WINEDLLPATH and
+  variables of the Mapping table (warnings on winecx), and `scripts/winecx-env.sh` (bash and zsh)
+  gives the same WINEDLLPATH and effective values as `cross env` in all 24 cases; for
+  `WINECX_GRAPHICS=wined3d|dxvk|dxmt` its whole environment equals the old script's.
+- Old cross.json (`{"runtime":"winecx-full","graphics":"d3dmetal"}`): `bottle show` prints
+  `graphics32  dxmt  32-bit DirectX 10/11 programs: DXMT (D3DMetal is 64-bit only)` and
+  `graphics9  wined3d  DirectX 9 programs, 32- and 64-bit: wined3d (D3DMetal has no DirectX 9)`; a
+  wined3d bottle prints `(D3DMetal bottles only)` for both.
+- Steam with the new default, fresh scratch bottle `st` (winecx-full, d3dmetal): `cross store
+  install st steam` (cached installer, client bootstrapped, 65 s), then `WINEDEBUG=+loaddll cross
+  steam st`: "Sign in to Steam" window after about 6 s, rendered normally; stopped with `cross run st
+  .../steam.exe -shutdown`. Today's Steam client is 64-bit (`steam.exe`, `steamsysinfo.exe`, the
+  cef.win64 webhelper: PE32+), so its dxgi loads came from D3DMetal as before; the only 32-bit
+  processes were `gldriverquery.exe` and `vulkandriverquery.exe` (OpenGL/Vulkan, no dxgi), so no
+  Steam process loaded DXMT.
+- The app builds (`app/build.sh`). **Not checked on screen** (the screen was locked): the two
+  pickers, their tooltips and their disabled state.
+- Not tested: Ori and the Blind Forest itself (not installed on this Mac) or any other real 32-bit
+  DX10/11 game; Portal 2 visually (above); D3D10 programs (Wine's d3d10.dll over DXMT's d3d10core).

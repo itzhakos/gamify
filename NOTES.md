@@ -2,6 +2,22 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **32-bit DirectX 10/11 to DXMT in D3DMetal bottles** (2026-11-03, branch claude/dxmt-32bit-e7c613,
+  for 0.10): D3DMetal 3.0 has no i386 DLLs and no d3d9, so in a D3DMetal bottle every 32-bit DX10/11
+  game fell to wined3d (FL 9_3 on winecx-full's Vulkan renderer, FL 10_1 "NVIDIA GeForce 8800 GTX"
+  on winecx's OpenGL): Ori and the Blind Forest DE (Unity 5.3, 32-bit, D3D11) on the user's M1
+  MacBook Pro. Now `graphics32` (cross.json, default `dxmt`; `dxvk`, `wined3d`) puts its folder after
+  D3DMetal: `WINEDLLPATH=runtimes/d3dmetal:runtimes/dxmt:<rt>/lib/wined3d:<rt>/lib/wine`,
+  `DXMT_CONFIG_FILE`, winemetal.dll in system32 + syswow64; 64-bit programs still get D3DMetal.
+  `graphics9` (`wined3d` default, `dxvk`) adds `runtimes/dxvk` after it for DX9 of both arches.
+  Verified (M4 Max, macOS 27.2, scratch bottles): d3d11test32 FL 0x9300 (wined3d) -> "Apple M4 Max"
+  FL 0xb000 (DXMT), 64-bit d3d11test still "AMD Compatibility Mode" (D3DMetal), d3d9test on wined3d
+  (2000 fps, vsync ignored) or with `graphics9 dxvk` on DXVK (Apple M4 Max, 118 fps); env of
+  wined3d/dxvk/dxmt bottles unchanged; Steam (now a 64-bit client) starts and loads no DXMT. DX9
+  stays on wined3d by default: Portal 2 started on DXVK (bottles/steamtest, environment only) but
+  MoltenVK failed 6 shadow-sampler pipelines and the screen was locked, so no picture. CLI `cross
+  bottle set <b> graphics32|graphics9`, app pickers "32-bit games" / "DirectX 9 games" under
+  Graphics; docs/app.md "32-bit DirectX and DirectX 9 games". Not tested with Ori itself.
 - **Update control in the toolbar** (2026-10-24, for 0.9.1): the update banner (top
   `safeAreaInset`) was drawn under the unified toolbar on macOS 27, so 0.8 could not update
   itself to 0.9 from the UI (the user saw clipped text and no button). Now a

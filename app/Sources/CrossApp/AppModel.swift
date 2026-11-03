@@ -693,6 +693,32 @@ final class AppModel: ObservableObject {
         applyPerformance(to: bottle)   // nvngx.dll + NGXCore for MetalFX, winemetal.dll for DXMT, cache dir for DXVK
     }
 
+    /// 32-bit DirectX 10/11 programs of a D3DMetal bottle (`BottleConfig.graphics32`).
+    func setGraphics32(_ graphics32: Graphics32, for name: String) {
+        guard var bottle = bottle(named: name) else { return }
+        bottle.config.graphics32 = graphics32
+        do {
+            try bottle.saveConfig()
+        } catch {
+            alertMessage = "\(error)"
+        }
+        reloadBottles()
+        applyPerformance(to: bottle)   // winemetal.dll in system32/syswow64 for DXMT, cache dir for DXVK
+    }
+
+    /// DirectX 9 programs of a D3DMetal bottle (`BottleConfig.graphics9`).
+    func setGraphics9(_ graphics9: Graphics9, for name: String) {
+        guard var bottle = bottle(named: name) else { return }
+        bottle.config.graphics9 = graphics9
+        do {
+            try bottle.saveConfig()
+        } catch {
+            alertMessage = "\(error)"
+        }
+        reloadBottles()
+        applyPerformance(to: bottle)   // cache dir for DXVK
+    }
+
     /// `cross bottle create`: writes cross.json, then runs wineboot --init as a job so
     /// the bottle shows up (with its log) right away.
     /// Returns the wineboot job (nil when the bottle could not be created).

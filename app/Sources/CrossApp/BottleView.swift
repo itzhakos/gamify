@@ -404,13 +404,16 @@ struct BottleView: View {
             }
             Spacer()
             if drivable {
-                Picker("Graphics", selection: Binding(get: { bottle.config.graphics },
-                                                      set: { model.setGraphics($0, for: bottle.name) })) {
-                    ForEach(Graphics.allCases, id: \.self) { g in Text(g.title).tag(g) }
+                VStack(alignment: .trailing, spacing: 6) {
+                    Picker("Graphics", selection: Binding(get: { bottle.config.graphics },
+                                                          set: { model.setGraphics($0, for: bottle.name) })) {
+                        ForEach(Graphics.allCases, id: \.self) { g in Text(g.title).tag(g) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 320)
+                    .help(HelpText.graphicsPicker)
+                    fallbackPickers
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 320)
-                .help(HelpText.graphicsPicker)
             }
             Button {
                 model.reveal(bottle.driveC)
@@ -419,6 +422,34 @@ struct BottleView: View {
             }
             .help(HelpText.showC)
         }
+    }
+
+    /// What a D3DMetal bottle does with what D3DMetal lacks (`BottleConfig.graphics32`,
+    /// `graphics9`); disabled for the other backends, which cover it themselves. DXVK is only
+    /// offered where the runtime has MoltenVK (or when the bottle already has it chosen).
+    private var fallbackPickers: some View {
+        let d3dmetal = bottle.config.graphics == .d3dmetal
+        let available = model.runtime(for: bottle)?.availableGraphics ?? []
+        return HStack(spacing: 12) {
+            Picker("32-bit games", selection: Binding(get: { bottle.config.graphics32 },
+                                                      set: { model.setGraphics32($0, for: bottle.name) })) {
+                ForEach(Graphics32.allCases.filter { $0 == .wined3d || available.contains($0.graphics) || $0 == bottle.config.graphics32 },
+                        id: \.self) { g in Text(g.title).tag(g) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help(d3dmetal ? HelpText.graphics32Picker : HelpText.fallbackPickerDisabled)
+            Picker("DirectX 9 games", selection: Binding(get: { bottle.config.graphics9 },
+                                                         set: { model.setGraphics9($0, for: bottle.name) })) {
+                ForEach(Graphics9.allCases.filter { $0 == .wined3d || available.contains($0.graphics) || $0 == bottle.config.graphics9 },
+                        id: \.self) { g in Text(g.title).tag(g) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help(d3dmetal ? HelpText.graphics9Picker : HelpText.fallbackPickerDisabled)
+        }
+        .font(.callout)
+        .disabled(!d3dmetal)
     }
 
     private var actions: some View {

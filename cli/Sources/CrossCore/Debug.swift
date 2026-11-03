@@ -802,13 +802,40 @@ extension Bottle {
     public func showLines(in project: Project) -> [String] {
         var lines = [name,
                      "  runtime     \(config.runtime)",
-                     "  graphics    \(config.graphics.rawValue)",
-                     "  disk        \(storageText)",
+                     "  graphics    \(config.graphics.rawValue)"]
+        lines += fallbackLines(in: project)
+        lines += ["  disk        \(storageText)",
                      "  location    \(location?.path ?? prefix.path)",
                      "  debugging   \(config.debug ? "on (WINEDEBUG=\(Debug.wineDebug), " + Debug.environment.keys.sorted().map { "\($0)=\(Debug.environment[$0]!)" }.joined(separator: " ") + ")" : "off")",
                      "performance (applies to programs started afterwards):"]
         lines += Bottle.performanceLines(config)
         return lines
+    }
+
+    /// The `graphics32` and `graphics9` lines of `cross bottle show`: each choice and what
+    /// those programs really get in this bottle (`Runtime.d3dmetalFallbacks`).
+    public func fallbackLines(in project: Project) -> [String] {
+        func line(_ key: String, _ value: String, _ text: String) -> String {
+            "  " + key.padding(toLength: 12, withPad: " ", startingAt: 0) + value.padding(toLength: 13, withPad: " ", startingAt: 0) + text
+        }
+        let c = config
+        guard c.graphics == .d3dmetal, Runtime.isKnown(c.runtime) else {
+            return [line("graphics32", c.graphics32.rawValue, "(D3DMetal bottles only)"),
+                    line("graphics9", c.graphics9.rawValue, "(D3DMetal bottles only)")]
+        }
+        let runtime = Runtime(project: project, name: c.runtime)
+        let got = (try? runtime.d3dmetalFallbacks(for: self, graphics: .d3dmetal, base: [:], warn: false)) ?? .init()
+        func why(_ choice: Graphics, _ got: Graphics) -> String {
+            guard choice != got else { return "" }
+            if choice != .wined3d {
+                do { try runtime.checkGraphics(choice) } catch { return " (\(choice.title) cannot run here: \(error))" }
+            }
+            return " (DXVK's folder, there for the other setting, has these DLLs too)"
+        }
+        return [line("graphics32", c.graphics32.rawValue,
+                     "32-bit DirectX 10/11 programs: \(got.dx32.title)\(why(c.graphics32.graphics, got.dx32)) (D3DMetal is 64-bit only)"),
+                line("graphics9", c.graphics9.rawValue,
+                     "DirectX 9 programs, 32- and 64-bit: \(got.dx9.title)\(why(c.graphics9.graphics, got.dx9)) (D3DMetal has no DirectX 9)")]
     }
 
     /// Each performance setting with what it does in this bottle.

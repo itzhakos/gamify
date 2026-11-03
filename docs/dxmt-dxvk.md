@@ -208,6 +208,12 @@ DXMT dir in WINEDLLPATH would do the same, slower. `scripts/test-dxbackends.sh` 
 
 ### How to wire into CrossCore (for the session that owns `cli/`)
 
+**Landed** (2026-10-22, docs/app.md "Graphics backends: DXVK and DXMT"); since 2026-11-03 (0.10)
+D3DMetal bottles also chain DXMT (32-bit DX10/11, `graphics32`, default) and optionally DXVK (DX9,
+`graphics9`) after D3DMetal: `runtimes/d3dmetal:runtimes/dxmt[:runtimes/dxvk]:<rt>/lib/wined3d:<rt>/lib/wine`,
+docs/app.md "32-bit DirectX and DirectX 9 games". The d3dmetal row of the recipe above is the
+`graphics32 wined3d` + `graphics9 wined3d` case.
+
 1. `Graphics` gets `dxvk` and `dxmt` (raw values = `WINECX_GRAPHICS`), with homes
    `runtimes/dxvk` / `runtimes/dxmt` next to `d3dmetalHome` (bundled app: next to D3DMetal in
    `SharedSupport/root/runtimes`).

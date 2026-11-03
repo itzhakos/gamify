@@ -42,6 +42,40 @@ case "$WINECX_GRAPHICS" in
   dxmt)     _d3d="$_root/runtimes/dxmt:" ;;
   *) echo "winecx-env: unknown WINECX_GRAPHICS='$WINECX_GRAPHICS' (d3dmetal|wined3d|dxvk|dxmt)" >&2; _d3d="$D3DMETAL_HOME:" ;;
 esac
+# D3DMetal has no i386 DLLs and no d3d9 (2026-11-03, 0.10), so with d3dmetal the 32-bit
+# DirectX 10/11 backend (WINECX_GRAPHICS32: dxmt, the default; dxvk; wined3d) and then the
+# DirectX 9 one (WINECX_GRAPHICS9: wined3d, the default; dxvk) go between D3DMetal and
+# lib/wined3d, e.g. d3dmetal:dxmt:dxvk:lib/wined3d:lib/wine. ntdll skips d3dmetal for 32-bit
+# processes (no i386-windows) and takes each DLL from the first folder that has it, so a folder
+# serves all of its DLLs: DXVK's has d3d9 and d3d10core/d3d11/dxgi. As in CrossCore
+# (Runtime.d3dmetalFallbacks), a backend that cannot run (not built, DXVK without MoltenVK) is
+# left out, and both variables end up as what 32-bit DX10/11 and DX9 really get (what
+# `cross env` exports); per bottle they are cross.json's graphics32/graphics9.
+_fallback() {   # $1 = dxmt|dxvk: append runtimes/$1 unless it is there or cannot run
+  case "$_d3d" in *"/runtimes/$1:"*) return ;; esac
+  [ -d "$_root/runtimes/$1/i386-windows" ] || return
+  [ "$1" = dxvk ] && [ ! -f "$WINECX_HOME/lib/libMoltenVK.dylib" ] && return
+  _d3d="$_d3d$_root/runtimes/$1:"
+}
+if [ "$WINECX_GRAPHICS" = d3dmetal ]; then
+  case "${WINECX_GRAPHICS32:-dxmt}" in
+    dxmt|dxvk) _fallback "${WINECX_GRAPHICS32:-dxmt}" ;;
+    wined3d) ;;
+    *) echo "winecx-env: unknown WINECX_GRAPHICS32='$WINECX_GRAPHICS32' (dxmt|dxvk|wined3d)" >&2 ;;
+  esac
+  case "${WINECX_GRAPHICS9:-wined3d}" in
+    dxvk) _fallback dxvk ;;
+    wined3d) ;;
+    *) echo "winecx-env: unknown WINECX_GRAPHICS9='$WINECX_GRAPHICS9' (dxvk|wined3d)" >&2 ;;
+  esac
+  case "$_d3d" in
+    *"/runtimes/dxmt:"*) export WINECX_GRAPHICS32=dxmt ;;
+    *"/runtimes/dxvk:"*) export WINECX_GRAPHICS32=dxvk ;;
+    *) export WINECX_GRAPHICS32=wined3d ;;
+  esac
+  case "$_d3d" in *"/runtimes/dxvk:"*) export WINECX_GRAPHICS9=dxvk ;; *) export WINECX_GRAPHICS9=wined3d ;; esac
+fi
+unset -f _fallback
 export WINEDLLPATH="${_d3d}$WINECX_HOME/lib/wined3d:$WINECX_HOME/lib/wine"
 unset _d3d
 

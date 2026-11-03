@@ -1,7 +1,8 @@
 import Foundation
 
-/// 64-bit DirectX 10/11/12 backend for a bottle. Exactly one of the two
-/// directories goes first in WINEDLLPATH (see Runtime.environment).
+/// 64-bit DirectX 10/11/12 backend for a bottle. Its directory goes first in WINEDLLPATH
+/// (see Runtime.environment); a D3DMetal bottle adds its `Graphics32`/`Graphics9` backends
+/// after it.
 public enum Graphics: String, Codable, CaseIterable {
     case d3dmetal   // Apple D3DMetal 3.0 (runtimes/d3dmetal), the default: DX11/DX12, 64-bit only
     case wined3d    // Wine's own d3d9/d3d10*/d3d11/d3d12/dxgi, moved to <runtime>/lib/wined3d
@@ -20,10 +21,55 @@ public enum Graphics: String, Codable, CaseIterable {
     }
 }
 
+/// Where a D3DMetal bottle sends 32-bit DirectX 10/11 programs. D3DMetal has no i386 DLLs,
+/// so before 0.10 every 32-bit DX10/11 game in a D3DMetal bottle fell through to wined3d
+/// (feature level 9_3/10_1). The chosen backend's folder goes right after D3DMetal's in
+/// WINEDLLPATH (`Runtime.d3dmetalFallbacks`); 64-bit programs still find D3DMetal first.
+/// Only used when `graphics` is d3dmetal: the other backends cover both architectures.
+public enum Graphics32: String, Codable, CaseIterable {
+    case dxmt      // DXMT (runtimes/dxmt), the default: 32-bit DX10/11 on Metal
+    case dxvk      // DXVK (runtimes/dxvk): 32-bit DX10/11 over MoltenVK (winecx-full)
+    case wined3d   // nothing in between: Wine's wined3d, as before 0.10
+
+    /// "dxmt|dxvk|wined3d" for usage texts.
+    public static var list: String { allCases.map(\.rawValue).joined(separator: "|") }
+    public var title: String { graphics.title }
+    /// The backend whose DLLs 32-bit programs get.
+    public var graphics: Graphics {
+        switch self {
+        case .dxmt: return .dxmt
+        case .dxvk: return .dxvk
+        case .wined3d: return .wined3d
+        }
+    }
+}
+
+/// Where a D3DMetal bottle sends DirectX 9 programs, 32- and 64-bit: D3DMetal has no d3d9,
+/// so they get wined3d (OpenGL) unless DXVK's folder goes after the 32-bit choice in
+/// WINEDLLPATH (`Runtime.d3dmetalFallbacks`). Only used when `graphics` is d3dmetal.
+public enum Graphics9: String, Codable, CaseIterable {
+    case dxvk      // DXVK (runtimes/dxvk) over MoltenVK (winecx-full)
+    case wined3d   // Wine's wined3d, the default (as before 0.10)
+
+    /// What a bottle gets when cross.json does not say. wined3d until DXVK's d3d9 is shown to
+    /// render a real game here: Portal 2 ran on it (2026-11-03) but MoltenVK failed to compile
+    /// its shadow-sampler shaders and the screen was locked, so no picture (docs/app.md).
+    public static let standard: Graphics9 = .wined3d
+    /// "dxvk|wined3d" for usage texts.
+    public static var list: String { allCases.map(\.rawValue).joined(separator: "|") }
+    public var title: String { graphics.title }
+    /// The backend whose d3d9.dll DirectX 9 programs get.
+    public var graphics: Graphics { self == .dxvk ? .dxvk : .wined3d }
+}
+
 /// Per-bottle settings, stored as `bottles/<name>/cross.json`.
 public struct BottleConfig: Codable, Equatable {
     public var runtime: String = Runtime.defaultName
     public var graphics: Graphics = .d3dmetal
+    /// 32-bit DirectX 10/11 programs of a D3DMetal bottle (no effect on the other backends).
+    public var graphics32: Graphics32 = .dxmt
+    /// DirectX 9 programs (both arches) of a D3DMetal bottle (no effect on the other backends).
+    public var graphics9: Graphics9 = Graphics9.standard
     /// Set for bottles backed by a disk image (Storage.swift); absent for folder bottles.
     public var storage: BottleStorage?
     /// Sync, DLSS via MetalFX, AVX, ray tracing, FPS cap, HUD, Retina (Performance.swift).
@@ -31,10 +77,13 @@ public struct BottleConfig: Codable, Equatable {
     /// Debugging mode: programs started afterwards log more (Debug.swift, `Debug.environment`).
     public var debug: Bool = false
 
-    public init(runtime: String = Runtime.defaultName, graphics: Graphics = .d3dmetal, storage: BottleStorage? = nil,
+    public init(runtime: String = Runtime.defaultName, graphics: Graphics = .d3dmetal, graphics32: Graphics32 = .dxmt,
+                graphics9: Graphics9 = Graphics9.standard, storage: BottleStorage? = nil,
                 performance: PerformanceSettings = PerformanceSettings(), debug: Bool = false) {
         self.runtime = runtime
         self.graphics = graphics
+        self.graphics32 = graphics32
+        self.graphics9 = graphics9
         self.storage = storage
         self.performance = performance
         self.debug = debug
@@ -45,6 +94,8 @@ public struct BottleConfig: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         runtime = try c.decodeIfPresent(String.self, forKey: .runtime) ?? Runtime.defaultName
         graphics = try c.decodeIfPresent(Graphics.self, forKey: .graphics) ?? .d3dmetal
+        graphics32 = try c.decodeIfPresent(Graphics32.self, forKey: .graphics32) ?? .dxmt
+        graphics9 = try c.decodeIfPresent(Graphics9.self, forKey: .graphics9) ?? Graphics9.standard
         storage = try c.decodeIfPresent(BottleStorage.self, forKey: .storage)
         performance = try c.decodeIfPresent(PerformanceSettings.self, forKey: .performance) ?? PerformanceSettings()
         debug = try c.decodeIfPresent(Bool.self, forKey: .debug) ?? false

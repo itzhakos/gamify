@@ -4,7 +4,9 @@ import Foundation
 /// MoltenVK, 32- and 64-bit, winecx-full only) and DXMT (runtimes/dxmt, D3D10/11 on Metal,
 /// 32- and 64-bit). Both are Wine builtins selected like D3DMetal, by putting their folder
 /// first in WINEDLLPATH; every backend then falls back to <runtime>/lib/wined3d for what it
-/// lacks (D3DMetal: all of i386 and d3d9). Build, layout, recipe: docs/dxmt-dxvk.md.
+/// lacks (D3DMetal: all of i386 and d3d9). A D3DMetal bottle puts its 32-bit and DirectX 9
+/// backends (`BottleConfig.graphics32`/`graphics9`) between the two: `d3dmetalFallbacks`.
+/// Build, layout, recipe: docs/dxmt-dxvk.md; the fallbacks: docs/app.md "32-bit DirectX and DirectX 9 games".
 extension Runtime {
     public static let defaultDXVK = "runtimes/dxvk"
     public static let defaultDXMT = "runtimes/dxmt"
@@ -49,6 +51,45 @@ extension Runtime {
         }
     }
 
+    /// What a D3DMetal bottle does with what D3DMetal lacks: it has no i386-windows folder
+    /// (ntdll skips it for 32-bit processes) and no d3d9.dll. `backends` are the folders that
+    /// go between D3DMetal's and lib/wined3d in WINEDLLPATH, in order: the 32-bit DirectX
+    /// 10/11 choice, then DXVK for DirectX 9 unless it is already there. D3DMetal's
+    /// x86_64-windows has every 64-bit DLL of DXMT and DXVK but d3d9.dll (and winemetal.dll,
+    /// which only DXMT's dxgi loads), so 64-bit DirectX 10/11/12 programs are unchanged.
+    /// A folder serves every DLL it has: DXVK's has d3d9 and d3d10core/d3d11/dxgi, so it
+    /// also takes the other job when the other choice is wined3d (`dx32`, `dx9`).
+    public struct D3DMetalFallbacks: Equatable {
+        public var backends: [Graphics] = []
+        /// What 32-bit DirectX 10/11 programs get: the first folder (DXMT and DXVK both have
+        /// i386 d3d10core/d3d11/dxgi), wined3d without one.
+        public var dx32: Graphics { backends.first ?? .wined3d }
+        /// What DirectX 9 programs get: DXVK when its folder is there (only it has d3d9).
+        public var dx9: Graphics { backends.contains(.dxvk) ? .dxvk : .wined3d }
+    }
+
+    /// The bottle's `D3DMetalFallbacks`; none for other backends (they cover both arches
+    /// themselves). A choice that cannot run here (not built, or DXVK on a runtime without
+    /// MoltenVK) is left out, so its programs get wined3d, with a warning (once per process;
+    /// `warn: false` for display).
+    public func d3dmetalFallbacks(for bottle: Bottle, graphics: Graphics,
+                                  base: [String: String] = ProcessInfo.processInfo.environment,
+                                  warn: Bool = true) throws -> D3DMetalFallbacks {
+        var fallbacks = D3DMetalFallbacks()
+        guard graphics == .d3dmetal else { return fallbacks }
+        let choices = [("32-bit DirectX 10/11", try graphics32(for: bottle, base: base).graphics),
+                       ("DirectX 9", try graphics9(for: bottle, base: base).graphics)]
+        for (what, choice) in choices where choice != .wined3d && !fallbacks.backends.contains(choice) {
+            do {
+                try checkGraphics(choice)
+                fallbacks.backends.append(choice)
+            } catch {
+                if warn { warnOnce("\(what) in '\(bottle.name)' falls back to wined3d: \(error)") }
+            }
+        }
+        return fallbacks
+    }
+
     /// What a backend needs in the environment beyond WINEDLLPATH (docs/dxmt-dxvk.md
     /// "Environment recipe"). `base` is the caller's environment.
     func backendEnvironment(_ graphics: Graphics, bottle: Bottle, base: [String: String]) -> [String: String] {
@@ -81,7 +122,9 @@ extension Runtime {
 
     /// Files a backend needs in the prefix; idempotent, cheap when nothing is missing, run by
     /// `applyPerformance` (create, settings change, before every launch). Returns what it did.
-    func prepareBackend(_ graphics: Graphics, bottle: Bottle) throws -> [String] {
+    /// `afterD3DMetal`: the backend is one of a D3DMetal bottle's `d3dmetalFallbacks`, so
+    /// not DXMT's 64-bit NVIDIA DLLs (D3DMetal has its own).
+    func prepareBackend(_ graphics: Graphics, bottle: Bottle, afterD3DMetal: Bool = false) throws -> [String] {
         let fm = FileManager.default
         var done: [String] = []
         switch graphics {
@@ -91,7 +134,7 @@ extension Runtime {
             // dxgi.dll) not found" otherwise). Builtin-marked, so it stays harmless for the
             // other backends. With MetalFX on, DXMT's NGX shim and nvapi too.
             var files = [("x86_64-windows", "system32", "winemetal.dll"), ("i386-windows", "syswow64", "winemetal.dll")]
-            if bottle.config.performance.metalfx {
+            if bottle.config.performance.metalfx && !afterD3DMetal {
                 files += [("x86_64-windows", "system32", "nvapi64.dll"), ("x86_64-windows", "system32", "nvngx.dll")]
             }
             for (arch, dir, name) in files {

@@ -35,6 +35,18 @@ public func warn(_ message: String) {
     FileHandle.standardError.write(("cross: " + message + "\n").data(using: .utf8)!)
 }
 
+private let warnedLock = NSLock()
+private var warnedMessages = Set<String>()
+
+/// `warn`, but each message only once per process: a launch builds its environment
+/// several times (Steam: the launch, the ActiveProcess reset, applyPerformance).
+public func warnOnce(_ message: String) {
+    warnedLock.lock()
+    let first = warnedMessages.insert(message).inserted
+    warnedLock.unlock()
+    if first { warn(message) }
+}
+
 /// A fully resolved process launch: what `cross` execve()s and the GUI posix_spawn()s,
 /// so both run with the same program, argv, envp and working directory.
 public struct Invocation {
