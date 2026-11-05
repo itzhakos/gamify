@@ -217,6 +217,12 @@ What is live, in one place; everything below it is the chronological log (dead e
   `build/winemac-msgwin`, `build/x86_64-full`, `runtimes/d9vk` + `downloads/{d9vk,dxvk}`, the 11
   merged `.claude/worktrees` and every `claude/*` branch. Kept: `bottles/steamtest`, `upstream/`,
   `downloads/crossover`, `runtimes/d3dmetal-2.1`, `dist/release-0.10`.
+  Second pass the same day (~3.5 GB more, project now  29G): `build/dxmt/{llvm-build,src,build.*,install}`
+  and `build/dxvk` (regenerable; `build-dxmt.sh` finds the kept LLVM install in `build/dxmt/llvm-15-x86_64`;
+  `upstream/llvm-project-15.0.7` stays because the script installs its `llvm/LICENSE.TXT` on every DXMT
+  build), `downloads/crossover/crossover-25.1.0.zip` (the unpacked CrossOver.app stays),
+  `downloads/{gog,epic,battlenet}` (re-downloaded on demand), and from git `src/nettest` (WinHTTP
+  DNS/TLS check, referenced nowhere) + `docs/screenshots/{app-icon-512,packaged-first-run}.png`.
 
 ## Goal
 A CrossOver-like app for running Windows games on macOS (Apple Silicon).
