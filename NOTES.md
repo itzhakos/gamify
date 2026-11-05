@@ -28,6 +28,24 @@ What is live, in one place; everything below it is the chronological log (dead e
   address), not Wine. Still unconfirmed on the M1 MacBook. (The Install click in Steam's dialog
   was sent from inside the bottle with a mingw Win32 helper, EnumWindows + SendInput at
   window-relative coordinates, since osascript has no Accessibility here.)
+  **Later the same night, with the user playing:** frames and sound still glitch, and every
+  first hover over a menu item stalls 200-300 ms. `sample` of the main thread during the stalls
+  puts nearly all of its time in `libRosettaRuntime` at routines that handle 80-bit registers,
+  the x87 tag/TOP words and 24/53/64-bit rounding: **Rosetta's software emulation of x87**.
+  The game's C# runs on Unity 5.3's Mono 2.x whose 32-bit JIT emits x87 for every float op
+  (mono.dll's "sse2" opt only covers conversions); the native engine is SSE (objdump: 15% SSE,
+  1.6% x87 instructions), so rendering is fine. Microbenchmark in the bottle (mingw, same loop,
+  `-mfpmath=387` vs `-mfpmath=sse`): 12.4 s vs 0.128 s for 250M float ops, **~97x slower**.
+  Not fixable in Gamify; expect the M1 to be worse. Second factor: with `WINENCPU=8` (CrossOver's
+  Wine honours it; `GetSystemInfo` then reports 8, affinity alone does not change the count)
+  Unity makes 7 instead of 15 busy-waiting workers and the process drops from ~1400% to ~200%
+  CPU. The frame A/B I took (16/8/4/2 CPUs) was contaminated: Unity throttles when its window
+  is not frontmost and the user was typing in Claude during some windows; only the CPU drop is
+  proven. A clean A/B needs the game focused and untouched at the title screen. Metal HUD log
+  lines need `MTL_HUD_ENABLED=1`; `MTL_HUD_LOG_ENABLED=1` alone writes nothing (so Debugging
+  mode's frame log never worked with hud off). A per-bottle "CPU cores" setting (WINENCPU) and
+  the Debugging-mode fix are being implemented in a worktree session (branch
+  claude/elegant-hofstadter-ffd27a).
 - **Update control in the toolbar** (2026-10-24, for 0.9.1): the update banner (top
   `safeAreaInset`) was drawn under the unified toolbar on macOS 27, so 0.8 could not update
   itself to 0.9 from the UI (the user saw clipped text and no button). Now a
