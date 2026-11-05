@@ -95,6 +95,9 @@ export WINEDEBUG="${WINEDEBUG:--all}"
 export WINEESYNC="${WINEESYNC:-1}"
 export DOTNET_EnableWriteXorExecute=0      # CrossOver sets this for .NET under Rosetta
 export MTL_HUD_ENABLED="${MTL_HUD_ENABLED:-0}"
+# Processors programs see (CW HACK 24711 in ntdll; per bottle cross.json performance.cpus,
+# `cross bottle set <b> cpus <n>|all`): passed on when set, unset = all of the Mac's.
+if [ -n "${WINENCPU:-}" ]; then export WINENCPU; else unset WINENCPU; fi
 export PATH="$WINECX_HOME/bin:$PATH"
 # winecx-full only: GStreamer's plugin dir and scanner are compiled in as absolute
 # paths; set them explicitly so the runtime keeps working if the tree is moved.

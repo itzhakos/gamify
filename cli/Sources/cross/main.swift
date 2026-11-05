@@ -22,13 +22,15 @@ cross - bottle manager and launcher for the winecx runtimes
   cross bottle set <name> sync auto|esync|msync      Windows sync objects: auto (default, = msync), esync or msync
   cross bottle set <name> metalfx on|off             DLSS through MetalFX (D3DMetal; default on)
   cross bottle set <name> avx on|off                 advertise AVX/AVX2 to games (ROSETTA_ADVERTISE_AVX)
+  cross bottle set <name> cpus <n>|all               CPU cores programs see (WINENCPU; default all, 1 to
+                                                     this Mac's count); for Unity 5 games that stutter
   cross bottle set <name> raytracing on|off|default  DirectX ray tracing in D3DMetal (D3DM_SUPPORT_DXR)
   cross bottle set <name> maxfps <n>|off             frame cap inside D3DMetal (D3DM_MAX_FPS)
   cross bottle set <name> hud on|off                 Metal performance HUD (MTL_HUD_ENABLED)
   cross bottle set <name> retina on|off              High Resolution (Retina) mode of the Mac driver
   cross bottle set <name> vendor <hex>|default       GPU vendor id D3DMetal reports (D3DM_VENDOR_ID)
-  cross bottle set <name> debug on|off               debugging mode: more Wine output and metal-HUD
-                                                     frame lines in each launch log
+  cross bottle set <name> debug on|off               debugging mode: more Wine output and the Metal HUD
+                                                     on screen, its frame lines in each launch log
   cross bottle set <name> storage <GB>|unlimited     (also: --storage <GB>)
   cross bottle set <name> location <folder>|default  move the bottle (e.g. to an external drive)
   cross bottle delete <name>
@@ -103,12 +105,17 @@ Runtimes: winecx (default) and winecx-full (same Wine + GStreamer, SDL2, MoltenV
 both in runtimes/; a bottle keeps the runtime it was created with.
 The project root is found by walking up from the binary (or set CROSS_ROOT).
 Debugging mode (cross.json "debug") applies to programs started afterwards (Steam games: after
-Steam restarts): MTL_HUD_LOG_ENABLED=1 and, instead of -all,
-WINEDEBUG=\(Debug.wineDebug).
+Steam restarts): MTL_HUD_ENABLED=1 + MTL_HUD_LOG_ENABLED=1 (the Metal HUD is shown whatever
+`hud` says, since it only logs while enabled; its frame lines go to the launch log) and,
+instead of -all, WINEDEBUG=\(Debug.wineDebug).
+cpus (cross.json "performance.cpus") makes programs see fewer processors (WINENCPU=<n>, read by
+Wine's ntdll at process start; Steam games: after Steam restarts). Unity 5 games such as Ori and
+the Blind Forest keep one busy-waiting worker thread per core and stutter when they see them all.
 Honoured from the caller's environment: WINEDEBUG (default -all), WINECX_GRAPHICS (overrides
-cross.json), D3DMETAL_HOME (runtimes/d3dmetal), and any variable a performance setting decides
-(WINEESYNC/WINEMSYNC as a pair, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX, D3DM_*): a non-empty
-value in the caller's environment wins over the bottle's setting.
+cross.json), D3DMETAL_HOME (runtimes/d3dmetal), and any variable a performance setting or
+debugging mode decides (WINEESYNC/WINEMSYNC as a pair, MTL_HUD_ENABLED, MTL_HUD_LOG_ENABLED,
+ROSETTA_ADVERTISE_AVX, WINENCPU, D3DM_*): a non-empty value in the caller's environment wins over
+the bottle's setting.
 """
 
 func fail(_ message: String) -> Never {
@@ -283,6 +290,16 @@ func main() throws {
                 bottle.config.performance.metalfx = parseSwitch(value, key)
             case "avx":
                 bottle.config.performance.avx = parseSwitch(value, key)
+            case "cpus", "cpu", "cores":
+                let host = PerformanceSettings.hostCPUs
+                if ["all", "default", "off"].contains(value.lowercased()) {
+                    bottle.config.performance.cpus = nil
+                } else {
+                    guard let n = Int(value), (1...host).contains(n) else {
+                        fail("cpus must be a number from 1 to \(host) (this Mac's cores) or all, not '\(value)'")
+                    }
+                    bottle.config.performance.cpus = n < host ? n : nil   // all of them is the default
+                }
             case "raytracing", "dxr":
                 bottle.config.performance.raytracing = value.lowercased() == "default" ? nil : parseSwitch(value, key)
             case "maxfps", "fps":
@@ -305,10 +322,11 @@ func main() throws {
                     guard let id = PerformanceSettings.parseVendorID(value) else { fail("vendor must be a hex id like 0x10DE or default, not '\(value)'") }
                     bottle.config.performance.vendorID = id
                 }
-            default: fail("unknown setting '\(key)' (graphics, graphics32, graphics9, storage, location, sync, metalfx, avx, raytracing, maxfps, hud, retina, vendor, debug)")
+            default: fail("unknown setting '\(key)' (graphics, graphics32, graphics9, storage, location, sync, metalfx, avx, cpus, raytracing, maxfps, hud, retina, vendor, debug)")
             }
             try bottle.saveConfig()
-            print("\(name): \(key) = \(value)")
+            let cpusKey = ["cpus", "cpu", "cores"].contains(key.lowercased())
+            print("\(name): \(key) = \(cpusKey ? bottle.config.performance.cpus.map(String.init) ?? "all" : value)")
             if ["graphics32", "graphics9"].contains(key.lowercased()) {
                 if bottle.config.graphics != .d3dmetal {
                     print("\(name): \(key.lowercased()) only matters for D3DMetal bottles; \(bottle.config.graphics.title) covers 32-bit and DirectX 9 programs itself")

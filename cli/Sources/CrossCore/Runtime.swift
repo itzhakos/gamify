@@ -133,10 +133,11 @@ public struct Runtime {
     /// The environment a process in `bottle` runs with. `base` is the environment
     /// to inherit (WINEDEBUG, DYLD fallback paths and WINECX_GRAPHICS are honoured when
     /// already set, like the script). The bottle's performance settings decide WINEESYNC/
-    /// WINEMSYNC, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX and the D3DM_* variables, except
-    /// where `base` already sets one (non-empty): the caller's value wins. Debugging mode
-    /// (`BottleConfig.debug`) swaps WINEDEBUG's `-all` for `Debug.wineDebug` and adds
-    /// `Debug.environment`, again only where the caller sets nothing.
+    /// WINEMSYNC, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX, WINENCPU and the D3DM_* variables,
+    /// except where `base` already sets one (non-empty): the caller's value wins. Debugging
+    /// mode (`BottleConfig.debug`) swaps WINEDEBUG's `-all` for `Debug.wineDebug` and adds
+    /// `Debug.environment` (MTL_HUD_ENABLED=1 over the `hud` setting, MTL_HUD_LOG_ENABLED=1),
+    /// again only where the caller sets nothing.
     public func environment(for bottle: Bottle, base: [String: String] = ProcessInfo.processInfo.environment) throws -> [String: String] {
         var env = base
         let graphics = try self.graphics(for: bottle, base: base)
@@ -193,7 +194,8 @@ public struct Runtime {
             if callerSync && PerformanceSettings.syncVariables.contains(key) { continue }
             env[key] = value
         }
-        // Debugging mode (Debug.swift): more diagnostics in each launch's log.
+        // Debugging mode (Debug.swift): more diagnostics in each launch's log. Applied after
+        // the performance settings, so its MTL_HUD_ENABLED=1 replaces a `hud` off's 0.
         if bottle.config.debug {
             for (key, value) in Debug.environment where nonEmpty(base[key]) == nil { env[key] = value }
         }
