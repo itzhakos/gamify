@@ -17,7 +17,17 @@ What is live, in one place; everything below it is the chronological log (dead e
   stays on wined3d by default: Portal 2 started on DXVK (bottles/steamtest, environment only) but
   MoltenVK failed 6 shadow-sampler pipelines and the screen was locked, so no picture. CLI `cross
   bottle set <b> graphics32|graphics9`, app pickers "32-bit games" / "DirectX 9 games" under
-  Graphics; docs/app.md "32-bit DirectX and DirectX 9 games". Not tested with Ori itself.
+  Graphics; docs/app.md "32-bit DirectX and DirectX 9 games". **Ori itself verified on the Mac
+  Studio 2026-11-06** with the installed app (updated in-app 0.9.1 -> 0.10 in 7 s, the user's
+  Steam account owns the game, 10.3 GB installed in 40 s; the user's bottle `Steam` in Application
+  Support, default settings): Unity's output_log says `Direct3D 11.0 [level 11.0], Renderer: Apple
+  M4 Max` and lsof shows `runtimes/dxmt/i386-windows/d3d11.dll`; Metal HUD log of a direct launch
+  (`MTL_HUD_ENABLED=1 MTL_HUD_LOG_ENABLED=1 cross run Steam OriDE.exe`, 49 s at the title screen):
+  57-60 fps vsynced, GPU 1.7 ms/frame mean (3.8 max), 19% of present intervals >20 ms. CPU
+  ~1450%: Unity 5.3's 15 "Worker Thread"s busy-wait in game code (sample: 184/256 at one
+  address), not Wine. Still unconfirmed on the M1 MacBook. (The Install click in Steam's dialog
+  was sent from inside the bottle with a mingw Win32 helper, EnumWindows + SendInput at
+  window-relative coordinates, since osascript has no Accessibility here.)
 - **Update control in the toolbar** (2026-10-24, for 0.9.1): the update banner (top
   `safeAreaInset`) was drawn under the unified toolbar on macOS 27, so 0.8 could not update
   itself to 0.9 from the UI (the user saw clipped text and no button). Now a
