@@ -154,7 +154,7 @@ What is live, in one place; everything below it is the chronological log (dead e
 - **Runtimes rebuilt and swapped** (2026-10-22): `runtimes/winecx` and `runtimes/winecx-full` now
   carry the three `src/patches` ported from CrossOver 26.1 (`win32u-d3dkmt-hwsched.patch` = HAGS
   for DLSS Frame Generation, `ntdll-emulate-xgetbv.patch`, `loader-plist-gamemode.patch`); the
-  previous trees are `runtimes/winecx-old` / `winecx-full-old` (delete when 0.7 is out). Verified
+  previous trees `runtimes/winecx-old` / `winecx-full-old` were deleted on 2026-11-05. Verified
   after the swap: hagstest HwSch 1/1/1, d3d11test vendor 0x10de, msync, d3d12test FL 12_2.
   Game Mode keys have no effect (macOS sees Wine processes as "wine" without a bundle id);
   XGETBV emulation never runs on macOS 27 (Rosetta handles it). Status summary at the top of
@@ -211,6 +211,12 @@ What is live, in one place; everything below it is the chronological log (dead e
   SteamWrapper.app) and bottles test, steam11, steamcx, d3dm3, d3dm3-steam, apptest, plus the
   CrossOver trial bottles in ~/Library/Application Support/CrossOver. downloads/crossover stays
   as reference. Remaining bottles: cx, full, games.
+- Retired on 2026-11-05 with the user's OK (~15 GB, project 46 -> 31 GB): `runtimes/winecx-old` +
+  `winecx-full-old`, `dist/release-0.3`..`0.9.1` (all on GitHub Releases) and `dist/stage`,
+  `build/dxtest/{bottles,winecx-full-dx}` (its logs/ and shots/ stay, docs/dxmt-dxvk.md cites them),
+  `build/winemac-msgwin`, `build/x86_64-full`, `runtimes/d9vk` + `downloads/{d9vk,dxvk}`, the 11
+  merged `.claude/worktrees` and every `claude/*` branch. Kept: `bottles/steamtest`, `upstream/`,
+  `downloads/crossover`, `runtimes/d3dmetal-2.1`, `dist/release-0.10`.
 
 ## Goal
 A CrossOver-like app for running Windows games on macOS (Apple Silicon).
