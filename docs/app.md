@@ -1607,6 +1607,17 @@ process affinity alone does not change the count games read.
 So half the cores is the recommendation. This is a per-game choice (fewer worker threads hurt
 engines that use them well), hence a per-bottle setting that defaults to all.
 
+**Caveat (added the same night):** the frame numbers above are contaminated. Unity throttles
+its frame rate while its window is not frontmost, and the user was typing in Claude during some
+of the one-minute windows (the 16-CPU window among them), so the fps and stall counts are not
+comparable. What is proven is the CPU side: with 16 processors the game runs at ~1400% CPU
+(15 busy-waiting workers), with 8 at ~200%. A clean comparison needs the game focused and
+untouched at the title screen for each value. The remaining stutter (200-300 ms on every first
+hover over a menu item) is not the worker threads at all: it is Rosetta's software emulation of
+x87 floating point, which Unity 5.3's 32-bit Mono JIT emits for every float operation of the
+game's C# code (NOTES.md, Ori bullet of 2026-11-06; measured ~97x slower than SSE2 in the
+bottle). That cost has no fix at Gamify's level.
+
 ### Design
 - `PerformanceSettings.cpus: Int?` (cross.json `"performance": {"cpus": 8}`; absent = all,
   decoded with `decodeIfPresent`, so older files load unchanged). `environment(graphics:)`

@@ -11,7 +11,11 @@ What is live, in one place; everything below it is the chronological log (dead e
   the real count; process affinity alone does not change the count). One-minute HUD-log
   measurements at the title/menu: 16 CPUs 41 fps, 15% of frames >20 ms, 47 frames >100 ms per
   minute; `WINENCPU=8` 60 fps, 4.3%, 0; 4: 55 fps, 1.9%, longer load stalls; 2: worse than the
-  default. New per-bottle `performance.cpus` (nil = all): `cross bottle set <b> cpus <n>|all`,
+  default. **Caveat (same night):** those frame numbers are contaminated: Unity throttles when
+  its window is not frontmost and the user was typing in Claude during some of the windows, so
+  only the CPU drop (~1400% -> ~200% with 8) is proven; a clean A/B at the title screen with the
+  game focused is still to do, and the stutter itself turned out to be Rosetta's x87 emulation
+  (see the Ori bullet below). New per-bottle `performance.cpus` (nil = all): `cross bottle set <b> cpus <n>|all`,
   `bottle show` line, `cross env` shows `WINENCPU`, winecx-env.sh passes it on, app "CPU cores"
   picker (All (16), 14 … 2) with a tooltip saying to try half the cores. Verified with a mingw
   test exe (32- and 64-bit) under `cross run`: 16 -> 8 (mask 0xff) after `cpus 8`, caller
