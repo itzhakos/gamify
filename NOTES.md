@@ -2,6 +2,26 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **CPU cores setting + Debugging mode's HUD log fixed** (2026-11-06, branch
+  claude/elegant-hofstadter-ffd27a, not released): Ori and the Blind Forest DE on DXMT renders fine
+  on the Mac Studio (GPU ~2 ms/frame) but stutters and crackles: Unity 5.3 starts one "Worker
+  Thread" per core minus one (15 on the M4 Max) that busy-wait at ~85% CPU each and starve the
+  main and audio threads under Rosetta. CrossOver's ntdll honours `WINENCPU=<n>` (CW HACK 24711:
+  `GetSystemInfo`, `GetActiveProcessorCount` and the affinity masks report n; ignored unless below
+  the real count; process affinity alone does not change the count). One-minute HUD-log
+  measurements at the title/menu: 16 CPUs 41 fps, 15% of frames >20 ms, 47 frames >100 ms per
+  minute; `WINENCPU=8` 60 fps, 4.3%, 0; 4: 55 fps, 1.9%, longer load stalls; 2: worse than the
+  default. New per-bottle `performance.cpus` (nil = all): `cross bottle set <b> cpus <n>|all`,
+  `bottle show` line, `cross env` shows `WINENCPU`, winecx-env.sh passes it on, app "CPU cores"
+  picker (All (16), 14 … 2) with a tooltip saying to try half the cores. Verified with a mingw
+  test exe (32- and 64-bit) under `cross run`: 16 -> 8 (mask 0xff) after `cpus 8`, caller
+  `WINENCPU=4` wins, `cpus all` removes it; the picker seen on screen ("CPU cores 8", "All (16)"),
+  not clicked. Also: Debugging mode's Metal HUD frame log never worked on a default bottle,
+  because libMTLHud logs only while the HUD is enabled and `hud` off exports `MTL_HUD_ENABLED=0`;
+  `Debug.environment` now adds `MTL_HUD_ENABLED=1` (the HUD is on screen in debugging mode).
+  d3d11test 10 s: 0 `metal-HUD:` lines before, 9 after; a caller's `MTL_HUD_ENABLED=0` still wins.
+  Ori itself not re-measured through the new setting. docs/app.md "CPU cores" and "Debugging mode
+  and log export" (HUD frame log fixed).
 - **32-bit DirectX 10/11 to DXMT in D3DMetal bottles** (2026-11-03, branch claude/dxmt-32bit-e7c613,
   for 0.10): D3DMetal 3.0 has no i386 DLLs and no d3d9, so in a D3DMetal bottle every 32-bit DX10/11
   game fell to wined3d (FL 9_3 on winecx-full's Vulkan renderer, FL 10_1 "NVIDIA GeForce 8800 GTX"
@@ -138,7 +158,8 @@ What is live, in one place; everything below it is the chronological log (dead e
 - **Debugging mode and log export** (2026-10-23, branch claude/debug-export-e1b029, for 0.8):
   per-bottle `debug` (cross.json; `cross bottle set <b> debug on`; Debugging box toggle) sets
   `WINEDEBUG=+timestamp,+pid,err+all,fixme+all,warn+seh,warn+module,+loaddll` and
-  `MTL_HUD_LOG_ENABLED=1` (per-second metal-HUD lines; real games only, not d3dtest).
+  `MTL_HUD_LOG_ENABLED=1` (per-second metal-HUD lines; since 2026-11-06 with `MTL_HUD_ENABLED=1`
+  too, without which nothing was logged on a default bottle).
   `cross debug export <b> [--out] [--since h]` / Export Logs… writes one zip (samples, gamify,
   system, logs, crash-reports, system-log, game-logs, each with a README; 16 s, ~300 KB here);
   `cross debug sample <b>` / Sample Running Game = `sample` of the game + wineserver. Ask the

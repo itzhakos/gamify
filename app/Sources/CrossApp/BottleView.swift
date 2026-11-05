@@ -558,6 +558,15 @@ struct PerformanceBox: View {
                 })
     }
 
+    /// CPU cores: All (nil) and the even counts below this Mac's, most first, plus the
+    /// bottle's own value when it is something else (set with the CLI, or on another Mac).
+    private var cpuChoices: [Int] {
+        let host = PerformanceSettings.hostCPUs
+        var counts = Set(stride(from: 2, to: host, by: 2))
+        if let cpus = bottle.config.performance.cpus { counts.insert(cpus) }
+        return counts.sorted(by: >)
+    }
+
     /// Ray tracing: 0 = D3DMetal's default, 1 = on, 2 = off.
     private var raytracing: Binding<Int> {
         Binding(get: { bottle.config.performance.raytracing.map { $0 ? 1 : 2 } ?? 0 },
@@ -601,6 +610,13 @@ struct PerformanceBox: View {
                     .fixedSize()
                     .disabled(!d3dmetal)
                     .help(HelpText.perfFPSCap)
+                    Picker("CPU cores", selection: setting(\.cpus)) {
+                        Text("All (\(PerformanceSettings.hostCPUs))").tag(Int?.none)
+                        ForEach(cpuChoices, id: \.self) { n in Text("\(n)").tag(Int?.some(n)) }
+                    }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .help(HelpText.perfCPUs)
                     Toggle("Metal HUD", isOn: setting(\.hud))
                         .help(HelpText.perfHUD)
                     Toggle("Retina (High Resolution)", isOn: setting(\.retina))

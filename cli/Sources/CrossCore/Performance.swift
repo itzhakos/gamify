@@ -42,6 +42,11 @@ public struct PerformanceSettings: Codable, Equatable {
     public var metalfx: Bool = true
     /// ROSETTA_ADVERTISE_AVX=1: Rosetta reports AVX/AVX2 in cpuid.
     public var avx: Bool = false
+    /// WINENCPU=<n>: programs see n processors (CW HACK 24711 in ntdll: GetSystemInfo,
+    /// GetActiveProcessorCount and the affinity masks); nil: all of the Mac's. ntdll ignores
+    /// a value of at least the real count. For engines that keep one busy-waiting worker
+    /// thread per core (Unity 5.3: Ori and the Blind Forest DE stutters with 16, not with 8).
+    public var cpus: Int?
     /// D3DM_SUPPORT_DXR=1/0; nil leaves D3DMetal's default (on for M3 and later).
     public var raytracing: Bool?
     /// D3DM_MAX_FPS; nil: no cap.
@@ -64,6 +69,7 @@ public struct PerformanceSettings: Codable, Equatable {
         version = PerformanceSettings.currentVersion
         metalfx = try c.decodeIfPresent(Bool.self, forKey: .metalfx) ?? true
         avx = try c.decodeIfPresent(Bool.self, forKey: .avx) ?? false
+        cpus = try c.decodeIfPresent(Int.self, forKey: .cpus)
         raytracing = try c.decodeIfPresent(Bool.self, forKey: .raytracing)
         maxFPS = try c.decodeIfPresent(Int.self, forKey: .maxFPS)
         hud = try c.decodeIfPresent(Bool.self, forKey: .hud) ?? false
@@ -72,6 +78,9 @@ public struct PerformanceSettings: Codable, Equatable {
     }
 
     public static let nvidiaVendorID: UInt32 = 0x10DE
+
+    /// The processors this Mac has (`cpus` nil means all of them).
+    public static var hostCPUs: Int { ProcessInfo.processInfo.activeProcessorCount }
 
     /// The vendor id D3DMetal is told to report, nil when it reports its own (0x1002).
     public func effectiveVendorID(graphics: Graphics) -> UInt32? {
@@ -97,6 +106,7 @@ public struct PerformanceSettings: Codable, Equatable {
             "WINEESYNC": sync.effective == .esync ? "1" : nil,
             "WINEMSYNC": sync.effective == .msync ? "1" : nil,
             "ROSETTA_ADVERTISE_AVX": avx ? "1" : nil,
+            "WINENCPU": nil,
             "MTL_HUD_ENABLED": hud ? "1" : "0",
             "D3DM_ENABLE_METALFX": d3dmetal && metalfx ? "1" : nil,
             "D3DM_VENDOR_ID": effectiveVendorID(graphics: graphics).map(PerformanceSettings.hex),
@@ -107,6 +117,7 @@ public struct PerformanceSettings: Codable, Equatable {
         ]
         if d3dmetal, let raytracing { env["D3DM_SUPPORT_DXR"] = raytracing ? "1" : "0" }
         if d3dmetal, let maxFPS, maxFPS > 0 { env["D3DM_MAX_FPS"] = String(maxFPS) }
+        if let cpus, cpus > 0 { env["WINENCPU"] = String(cpus) }
         return env
     }
 

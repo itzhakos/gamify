@@ -214,7 +214,7 @@ For a Finder-like launch from a terminal:
 - Program list since 2026-10-20 (see "Stores and programs"); still no icons, no
   winetricks/DLL overrides UI, no free-form per-bottle env overrides (WINEDEBUG comes from the
   app's environment, or from Debugging mode since 2026-10-23; sync, HUD, AVX and the D3DM_* variables are Performance settings since
-  2026-10-22), no app icon.
+  2026-10-22, CPU cores (WINENCPU) since 2026-11-06), no app icon.
 - The job list is in memory only; logs stay on disk. A game started by Steam is
   Steam's child, not a job, so use Kill Bottle for it.
 - The app bundle must stay inside the checkout, or have its root set in Settings.
@@ -944,9 +944,10 @@ CW HACK 24905, another session's work in src/patches).
 | `sync`: `auto` \| `esync` \| `msync` | auto (= msync since 0.9; esync before) | `WINEESYNC=1` or `WINEMSYNC=1` (exactly one), from `SyncMode.effective` | msync = Mach semaphores + ulock waits, esync = a pipe pair per object polled with `poll()` (macOS has no eventfd). Measured on Dishonored 2 (2026-10-24, NOTES.md): esync kept 36-57% of the game's CPU samples inside ntdll's wait path and the game dropped frames; msync 18% and a steady 60 fps. CrossOver's macOS default is msync as well. Change only while nothing runs in the bottle (the wineserver keeps its mode; Steam games need Restart Steam). The block carries `"version": 2` since 0.9: a block without it (0.7/0.8 wrote every field, default esync) loads an explicit `esync` as `auto`, so existing bottles move to msync by themselves; `esync` written by 0.9 or later is a choice and stays. |
 | `metalfx` | on | D3DMetal only: `D3DM_ENABLE_METALFX=1`, `D3DM_VENDOR_ID=0x10DE`; `system32\nvngx.dll` + `nvapi64.dll` (copied from `runtimes/d3dmetal/x86_64-windows` when missing); `HKLM\Software\NVIDIA Corporation\Global\NGXCore\FullPath = C:\windows\system32` (REG_SZ) | Off: the variables are not set; files and registry value stay. With the NVIDIA vendor id Streamline-based games accept the adapter (it still says "AMD Compatibility Mode"). |
 | `avx` | off | `ROSETTA_ADVERTISE_AVX=1` | Without the XGETBV hack (stage 2, CW HACK 23427) a game that executes `xgetbv` after seeing AVX can still die. |
+| `cpus` | absent (= all) | `WINENCPU=<n>` | Since 2026-11-06: the processors programs see (CW HACK 24711 in ntdll). See "CPU cores" below. |
 | `raytracing` | default (absent) | `D3DM_SUPPORT_DXR=1` / `0` | D3DMetal only; absent = D3DMetal's default (on for M3 and later). |
 | `maxFPS` | absent | `D3DM_MAX_FPS=<n>` | D3DMetal only. |
-| `hud` | off | `MTL_HUD_ENABLED=1` (off: `0`, as before) | |
+| `hud` | off | `MTL_HUD_ENABLED=1` (off: `0`, as before) | Debugging mode sets `1` whatever this says (since 2026-11-06, "Debugging mode and log export"). |
 | `retina` | off | `HKCU\Software\Wine\Mac Driver\RetinaMode = Y` / `N` (REG_SZ) | winemac.drv reads it at process start for the whole prefix (macdrv_main.c:415, "consistent for all processes in the prefix"): change it with nothing running. An absent value counts as off, so default bottles get no write. |
 | `vendorID` | absent | `D3DM_VENDOR_ID=0x....` | Advanced override; absent = 0x10DE while metalfx is on, D3DMetal's own (0x1002) otherwise. |
 
@@ -962,6 +963,7 @@ cross bottle show <name>                           runtime, graphics, disk, loca
 cross bottle set <name> sync auto|esync|msync      (auto = msync)
 cross bottle set <name> metalfx on|off             (alias dlss)
 cross bottle set <name> avx on|off
+cross bottle set <name> cpus <n>|all               (aliases cpu, cores; 1 to this Mac's cores; since 2026-11-06)
 cross bottle set <name> raytracing on|off|default  (alias dxr)
 cross bottle set <name> maxfps <n>|off             (alias fps)
 cross bottle set <name> hud on|off
@@ -979,8 +981,9 @@ cross cache clear <bottle> [<exe name>]            without an exe: list the cach
 - Bottle page, below the Run .exe / Wine Configuration box: a **Performance** box
   (`PerformanceBox` in BottleView.swift) with Sync (Automatic/ESync/MSync), DLSS via MetalFX
   ("Games that offer DLSS get MetalFX upscaling and frame generation"; disabled for
-  wined3d), Advertise AVX, Ray tracing (Default/On/Off), FPS cap (empty = off), Metal HUD,
-  Retina (High Resolution), and the note that settings apply to programs started afterwards.
+  wined3d), Advertise AVX, Ray tracing (Default/On/Off), FPS cap (empty = off), CPU cores
+  (since 2026-11-06), Metal HUD, Retina (High Resolution), and the note that settings apply to
+  programs started afterwards.
   Each change saves cross.json (`AppModel.setPerformance`); a metalfx/retina change, a switch
   to D3DMetal and a new bottle's finished wineboot run `applyPerformance` in the background.
 - Programs box: a `…` menu per program with **Clear Shader Cache (size)…** (asks first; the
@@ -1163,7 +1166,8 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 | Advertise AVX | Tells games this Mac supports AVX, a set of CPU instructions some newer games require. Turn it on only if a game refuses to start with a message about AVX or an unsupported CPU. |
 | Ray tracing picker | Lets DirectX 12 games use ray tracing (realistic lighting and reflections) through D3DMetal. Default: on with an M3 chip or newer. Set it Off when a game turns ray tracing on by itself and runs slowly. |
 | FPS cap | Limits the frame rate, for example 60. Steadier, cooler and quieter, and a good match for frame generation. Leave it empty for no limit. |
-| Metal HUD | Shows Apple's performance overlay in the game window: frame rate, GPU time and whether MetalFX is active. Useful while tuning, off for playing. |
+| CPU cores picker | How many processor cores Windows programs in this bottle see. Games built on Unity 5 and other engines that keep one busy-waiting thread per core (Ori and the Blind Forest Definitive Edition) stutter and crackle on Apple Silicon when they see every core: try half the cores. Leave it on All for everything else. Applies to programs started afterwards; for Steam games, restart Steam. |
+| Metal HUD | Shows Apple's performance overlay in the game window: frame rate, GPU time and whether MetalFX is active. Useful while tuning, off for playing. Debugging mode shows it too. |
 | Retina (High Resolution) | Renders at the display's full resolution. Sharper, but roughly four times the pixels, so lower frame rates. Off scales a half-resolution image up, which is what most games want. Change it only while nothing runs in this bottle. |
 
 ### BottleView.swift: StorageSizeField (New Bottle and StorageSheet)
@@ -1336,11 +1340,16 @@ non-empty value (the caller wins, as for every other variable):
   left out on purpose: it dumps registers for every exception and floods games that use
   exceptions for control flow. Crashes are printed anyway ("wine: Unhandled page fault …
   starting debugger…" is a MESSAGE, independent of WINEDEBUG).
-- `MTL_HUD_LOG_ENABLED=1`: Apple's libMTLHud logs one NSLog line per second
-  (`metal-HUD: <frame counter>,<mem>,<mem>,<present ms>,<gpu ms>,…` for every frame of that
-  second) to stderr, i.e. into the launch log, and to the unified log (subsystem libMTLHud,
-  process `wine`). It does not need the on-screen HUD (`MTL_HUD_ENABLED=0`). About 1-2 KB per
-  second at 60 fps.
+- `MTL_HUD_ENABLED=1` + `MTL_HUD_LOG_ENABLED=1`: Apple's libMTLHud logs one NSLog line per
+  second (`metal-HUD: <frame counter>,<mem>,<mem>,<present ms>,<gpu ms>,…` for every frame of
+  that second) to stderr, i.e. into the launch log, and to the unified log (subsystem libMTLHud,
+  process `wine`). About 1-2 KB per second at 60 fps. It only logs while the HUD itself is
+  enabled, so the Metal HUD is on screen while debugging mode is on, whatever the bottle's `hud`
+  setting says (debugging mode is applied after the performance settings and replaces their
+  `MTL_HUD_ENABLED=0`). Until 2026-11-06 debugging mode set only `MTL_HUD_LOG_ENABLED=1`, which
+  wrote nothing unless `hud` was on (found with d3d11test on macOS 27.2; the 2026-10-23 note below
+  saw no lines from d3dtest even with the HUD on, and Split Fiction lines without it, neither of
+  which reproduced or is explained).
 DXVK, DXMT and MoltenVK already log at `info` by default (DXVK's log goes to
 `<prefix>/cache/dxvk`), so nothing is added for them. Like the Performance settings it applies
 to programs started afterwards; a game started by Steam inherits Steam's environment, so Steam
@@ -1385,7 +1394,8 @@ cross debug sample <bottle> [--out <folder>]                      (default ~/Lib
 
 ### App (`DebugView.swift`)
 A Debugging box under Performance: **Debugging mode** toggle (saves cross.json; help text says
-what it changes and "applies to programs started afterwards; for Steam games restart Steam"),
+what it changes, that the Metal HUD is shown in the game while it is on, and "applies to programs
+started afterwards; for Steam games restart Steam"),
 **Export Logs…** (NSSavePanel on the Desktop with the default name, export in the background
 with the current step shown, then "Saved <name> (<size>)" and **Reveal in Finder**), **Sample
 Running Game** (`Debug.sample` into the bottle's logs folder, then Reveal in Finder), and the
@@ -1401,7 +1411,8 @@ line "Send the zip when you report a problem." Every control has a `.help` toolt
   `err:vulkan`, `fixme:keyboard`). Speed: 120.9 / 121.1 fps off vs 120.0 / 120.0 fps on (two runs
   each; the test is capped by the display, so this only shows no stall). In a first-start run
   the extra output was 61 lines in total.
-- **metal-HUD lines did not appear for d3d11test/d3d12test** (windowed, fullscreen, 10-50 s,
+- **metal-HUD lines did not appear for d3d11test/d3d12test** (superseded 2026-11-06, see "HUD
+  frame log fixed" below: with `MTL_HUD_ENABLED=1` d3d11test logs them) (windowed, fullscreen, 10-50 s,
   with and without `MTL_HUD_ENABLED=1`, `MTL_HUD_MIN_WIDTH_REQUIRED=0`, frontmost or not): with the
   HUD off libMTLHud is not even loaded for them, with it on it loads but logs nothing. In a real
   game it works: the Split Fiction runs of 2026-10-22 (bottle `hud` setting off, only
@@ -1428,6 +1439,21 @@ line "Send the zip when you report a problem." Every control has a `.help` toolt
   declined, so the box, the save panel and Reveal in Finder were not seen or clicked.
 - Not tested: `steam-check.txt`/`steam-games.txt` on a bottle with Steam (the scratch bottle
   has none; the user's bottles were not touched), a real crash, a real frozen game.
+
+### HUD frame log fixed (2026-11-06, scratch bottle `cpu` on winecx, M4 Max, macOS 27.2)
+- Found on the Mac Studio while measuring Ori: with `MTL_HUD_LOG_ENABLED=1` and
+  `MTL_HUD_ENABLED` unset or `0`, `src/d3dtest/d3d11test.exe` gives zero `metal-HUD:` lines; with
+  `MTL_HUD_ENABLED=1` it gives them. Since `PerformanceSettings.environment` sets
+  `MTL_HUD_ENABLED=0` when `hud` is off, debugging mode's frame log never worked on a default
+  bottle. Now `Debug.environment` is `MTL_HUD_ENABLED=1` + `MTL_HUD_LOG_ENABLED=1`.
+- `cross env cpu` with debug off: `MTL_HUD_ENABLED=0`, no MTL_HUD_LOG_ENABLED; with debug on:
+  `MTL_HUD_ENABLED=1`, `MTL_HUD_LOG_ENABLED=1`; `cross bottle show` prints `debugging on (…,
+  MTL_HUD_ENABLED=1 MTL_HUD_LOG_ENABLED=1)` and `hud off  MTL_HUD_ENABLED=1 while debugging mode
+  is on`.
+- `cross run cpu d3d11test.exe 600 1` (10 s at 60 fps): debug off 0 `metal-HUD:` lines, debug on
+  9 (`metal-HUD: 60,261.75,708.03,34.05,0.02,44.18,…` then 16.67 ms present intervals);
+  `MTL_HUD_ENABLED=0` from the caller with debug on: `cross env` keeps the caller's 0 and the run
+  has 0 lines (caller wins, and confirms the HUD has to be enabled to log).
 
 ## 32-bit DirectX and DirectX 9 games (2026-11-03)
 Why: D3DMetal 3.0 ships only `x86_64-windows`/`x86_64-unix` and no `d3d9.dll`, and ntdll takes each
@@ -1557,3 +1583,72 @@ same bottle.
   pickers, their tooltips and their disabled state.
 - Not tested: Ori and the Blind Forest itself (not installed on this Mac) or any other real 32-bit
   DX10/11 game; Portal 2 visually (above); D3D10 programs (Wine's d3d10.dll over DXMT's d3d10core).
+
+## CPU cores (2026-11-06)
+Why: Ori and the Blind Forest Definitive Edition (Unity 5.3.2, 32-bit, DXMT since 0.10) renders
+fine on the Mac Studio (M4 Max, 16 cores; GPU about 2 ms per frame) but stutters and its sound
+crackles. Unity 5.3 creates one "Worker Thread" per core minus one, and they busy-wait in game
+code at about 85% CPU each: 15 of them on the M4 Max, which starve the main and audio threads
+under Rosetta. CrossOver's Wine has an answer, CW HACK 24711 in `dlls/ntdll/unix/system.c`
+(`init_cpu_info`): `WINENCPU=<n>` makes ntdll report n processors when n is above 0 and below the
+real count (otherwise it is ignored). `GetSystemInfo().dwNumberOfProcessors`,
+`GetActiveProcessorCount` and the process and system affinity masks then all say n. Setting the
+process affinity alone does not change the count games read.
+
+### Measurements (Ori's title/menu, one minute each, Metal HUD frame log, 2026-11-06)
+
+| Processors the game sees | fps | frames > 20 ms | frames > 100 ms per minute |
+|---|---|---|---|
+| 16 (all, the default) | 41 | 15% | 47 |
+| 8 (`WINENCPU=8`) | 60 | 4.3% | 0 |
+| 4 | 55 | 1.9% | longer load stalls |
+| 2 | worse than the default | | |
+
+So half the cores is the recommendation. This is a per-game choice (fewer worker threads hurt
+engines that use them well), hence a per-bottle setting that defaults to all.
+
+### Design
+- `PerformanceSettings.cpus: Int?` (cross.json `"performance": {"cpus": 8}`; absent = all,
+  decoded with `decodeIfPresent`, so older files load unchanged). `environment(graphics:)`
+  exports `WINENCPU=<n>` only when it is set; like every performance variable, a non-empty
+  `WINENCPU` in the caller's environment wins. `PerformanceSettings.hostCPUs` is
+  `ProcessInfo.activeProcessorCount`.
+- ntdll reads the variable at process start, so it applies to programs started afterwards; a
+  Steam game inherits Steam's environment, so Steam has to be restarted (Restart Steam).
+- A bottle moved to a Mac with fewer cores than its `cpus` simply sees all of them (ntdll ignores
+  the value); `cross bottle show` says so.
+- `scripts/winecx-env.sh` passes `WINENCPU` on when it is set and leaves it unset otherwise.
+
+### CLI
+```
+cross bottle set <name> cpus <n>|all     1 to this Mac's cores (16 here); this Mac's count is stored as all
+cross bottle show <name>                 cpus  all   processors programs see (WINENCPU); all = the Mac's 16
+                                         cpus  8     WINENCPU=8: processors programs see; all = the Mac's 16
+cross env <name>                         WINENCPU=8
+```
+
+### App
+A menu-style **CPU cores** picker in the Performance box's second row (after FPS cap): "All
+(16)" and the even counts below this Mac's (14, 12, … 2), plus the bottle's own value when it is
+something else (an odd count set with the CLI, or a count from a bigger Mac). Saved through
+`AppModel.setPerformance` like the other performance controls. Tooltip `HelpText.perfCPUs`
+("Hover help", performance box).
+
+### Verified (2026-11-06, M4 Max 16 cores, macOS 27.2, scratch bottle `cpu` on winecx, CROSS_BOTTLES in the session scratchpad, runtimes from the checkout)
+- A mingw test program (`i686-w64-mingw32-gcc` and `x86_64-w64-mingw32-gcc`; prints
+  `GetSystemInfo().dwNumberOfProcessors`, `GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)` and
+  `GetProcessAffinityMask`) under `cross run`: default `16 16 0xffff 0xffff`; after `cross bottle
+  set cpu cpus 8` both the 32- and the 64-bit build print `8 8 0xff 0xff`, `cross env cpu` shows
+  `WINENCPU=8` and cross.json has `"cpus" : 8`; `WINENCPU=4` from the caller wins (`cross env`
+  `WINENCPU=4`, the program prints 4 and `0xf`); `cross bottle set cpu cpus all` removes the key
+  from cross.json and the variable from `cross env`, and the program prints 16 again.
+- `set cpus 0`, `17`, `abc` fail with "cpus must be a number from 1 to 16 (this Mac's cores) or
+  all"; `set cpus 16` stores all.
+- `scripts/winecx-env.sh` sourced with `WINENCPU` empty leaves it unset, with `WINENCPU=6` exports 6.
+- The app (`app/build.sh`, started with CROSS_ROOT = the checkout and CROSS_BOTTLES = the scratch
+  folder; window captured with `swift scripts/listwindows.swift` + `screencapture -l <id> -x`): the
+  Performance box shows "CPU cores 8" for the bottle set to 8 and "All (16)" after `cpus all`.
+  **Not clicked**: the menu was not opened and no value was picked in the app (no Accessibility
+  here); the picker writes through the same `setPerformance` path as the other controls.
+- **Not measured with the setting itself**: the Ori numbers above were taken with `WINENCPU` set
+  by hand on the user's bottle, before this setting existed.

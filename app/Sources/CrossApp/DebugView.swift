@@ -23,7 +23,7 @@ struct DebugBox: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 16) {
                     Toggle("Debugging mode", isOn: debugMode)
-                        .help("More diagnostics in each program's log: Wine's errors, warnings and DLL loads with timestamps (WINEDEBUG=\(Debug.wineDebug) instead of -all) and one Metal HUD line per second with frame and GPU times (MTL_HUD_LOG_ENABLED=1). Applies to programs started afterwards; for Steam games restart Steam. Turn it on, reproduce the problem, then Export Logs….")
+                        .help("More diagnostics in each program's log: Wine's errors, warnings and DLL loads with timestamps (WINEDEBUG=\(Debug.wineDebug) instead of -all) and one Metal HUD line per second with frame and GPU times (MTL_HUD_ENABLED=1, MTL_HUD_LOG_ENABLED=1), so the Metal HUD is shown in the game while this is on. Applies to programs started afterwards; for Steam games restart Steam. Turn it on, reproduce the problem, then Export Logs….")
                     Button("Export Logs…", action: exportLogs)
                         .disabled(working)
                         .help("Saves a zip with everything needed to diagnose a crash or freeze: Gamify's launch logs, crash reports, macOS log entries, the games' own logs, system information and this bottle's settings (last 24 hours). Each folder has a README listing what is included. File paths and your macOS user name appear in it.")

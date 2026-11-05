@@ -14,10 +14,14 @@ public enum Debug {
     /// exception and floods games that use exceptions for control flow.
     public static let wineDebug = "+timestamp,+pid,err+all,fixme+all,warn+seh,warn+module,+loaddll"
 
-    /// Added in debugging mode. MTL_HUD_LOG_ENABLED: Apple's Metal HUD writes one line per
-    /// frame to stdout ("metal-HUD: <frame>,<mem>,<mem>,<present ms>,<gpu ms>,..."), so the
-    /// log shows frame times right up to a freeze, without the HUD on screen.
+    /// Added in debugging mode. MTL_HUD_LOG_ENABLED: Apple's Metal HUD writes a line per
+    /// second to the launch log ("metal-HUD: <frame>,<mem>,<mem>,<present ms>,<gpu ms>,..."
+    /// for every frame of that second), so the log shows frame times right up to a freeze.
+    /// It only logs while the HUD itself is enabled (with MTL_HUD_ENABLED unset or 0 libMTLHud
+    /// writes nothing, 2026-11-06), so MTL_HUD_ENABLED=1 comes with it, over the bottle's `hud`
+    /// setting: the HUD is on screen while debugging mode is on.
     public static let environment: [String: String] = [
+        "MTL_HUD_ENABLED": "1",
         "MTL_HUD_LOG_ENABLED": "1",
     ]
 
@@ -481,7 +485,7 @@ public enum Debug {
         func lines(_ t: Tail) -> String { "\(t.total) lines" + (t.cut ? ", the newest \(t.capacity) kept" : "") }
         section.write("d3dmetal.txt", d3dm.text, why: "D3DMetal's own messages (unsupported API calls, errors) (\(lines(d3dm)))")
         section.write("metal-hud.txt", hud.text,
-                      why: "Metal HUD lines, one per second per game with MTL_HUD_LOG_ENABLED=1 (debugging mode): frame counter, memory, then present interval and GPU time per frame (\(lines(hud)))")
+                      why: "Metal HUD lines, one per second per game with MTL_HUD_ENABLED=1 + MTL_HUD_LOG_ENABLED=1 (debugging mode): frame counter, memory, then present interval and GPU time per frame (\(lines(hud)))")
         section.write("gpu-kernel.txt", gpu.text, why: "kernel messages about the GPU (restarts, AGX errors) (\(lines(gpu)))")
         section.write("wine.txt", wine.text,
                       why: "everything else Wine processes logged (\(lines(wine)); \(noise) Core Audio/App Intents/text input lines left out)")
@@ -853,13 +857,22 @@ extension Bottle {
             ("sync", p.sync.text, vars(["WINEESYNC", "WINEMSYNC"])),
             ("metalfx", onOff(p.metalfx), d3dmetal ? (p.metalfx ? vars(["D3DM_ENABLE_METALFX"]) + ", nvngx.dll + nvapi64.dll in system32, NGXCore\\FullPath" : "") : onlyD3DMetal),
             ("avx", onOff(p.avx), vars(["ROSETTA_ADVERTISE_AVX"])),
+            ("cpus", p.cpus.map(String.init) ?? "all", cpusText(p.cpus)),
             ("raytracing", p.raytracing.map(onOff) ?? "default", d3dmetal ? vars(["D3DM_SUPPORT_DXR"]) : onlyD3DMetal),
             ("maxfps", p.maxFPS.map(String.init) ?? "off", d3dmetal ? vars(["D3DM_MAX_FPS"]) : onlyD3DMetal),
-            ("hud", onOff(p.hud), vars(["MTL_HUD_ENABLED"])),
+            ("hud", onOff(p.hud), config.debug && !p.hud ? "MTL_HUD_ENABLED=1 while debugging mode is on" : vars(["MTL_HUD_ENABLED"])),
             ("retina", onOff(p.retina), "RetinaMode=\(p.retina ? "Y" : "N")"),
         ]
         lines.append(("vendor", p.vendorID.map(PerformanceSettings.hex) ?? "default",
                       d3dmetal ? (vars(["D3DM_VENDOR_ID"]).isEmpty ? "D3DMetal's own (0x1002)" : vars(["D3DM_VENDOR_ID"])) : onlyD3DMetal))
         return lines.map { "  " + $0.0.padding(toLength: 12, withPad: " ", startingAt: 0) + $0.1.padding(toLength: 13, withPad: " ", startingAt: 0) + $0.2 }
+    }
+
+    /// The `cpus` line's text: what programs see, against this Mac's core count.
+    static func cpusText(_ cpus: Int?) -> String {
+        let host = PerformanceSettings.hostCPUs
+        guard let cpus, cpus > 0 else { return "processors programs see (WINENCPU); all = the Mac's \(host)" }
+        let effect = cpus < host ? "" : " (no effect: this Mac has \(host), Wine ignores a value that is not below that)"
+        return "WINENCPU=\(cpus): processors programs see; all = the Mac's \(host)\(effect)"
     }
 }

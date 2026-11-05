@@ -199,9 +199,16 @@ enum HelpText {
         Limits the frame rate, for example 60. Steadier, cooler and quieter, and a good match \
         for frame generation. Leave it empty for no limit.
         """
+    static let perfCPUs = """
+        How many processor cores Windows programs in this bottle see. Games built on Unity 5 \
+        and other engines that keep one busy-waiting thread per core (Ori and the Blind Forest \
+        Definitive Edition) stutter and crackle on Apple Silicon when they see every core: try \
+        half the cores. Leave it on All for everything else. Applies to programs started \
+        afterwards; for Steam games, restart Steam.
+        """
     static let perfHUD = """
         Shows Apple's performance overlay in the game window: frame rate, GPU time and whether \
-        MetalFX is active. Useful while tuning, off for playing.
+        MetalFX is active. Useful while tuning, off for playing. Debugging mode shows it too.
         """
     static let perfRetina = """
         Renders at the display's full resolution. Sharper, but roughly four times the pixels, \
