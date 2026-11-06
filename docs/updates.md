@@ -271,7 +271,7 @@ CLI and the app only, so `runtime-version` stayed `winecx-full-b06c9dee8503` and
 Trigger: Ori and the Blind Forest DE (32-bit) on the user's M1 MacBook Pro; not yet confirmed
 there.
 
-## Next release with x87sidecar: full-DMG update
+## 0.13 (2026-11-06): x87sidecar, a full-DMG update
 
 The `x87` setting (docs/app.md "x87 acceleration") needs a runtime whose ntdll carries
 `src/patches/loader-rosetta-x87.patch` plus the new `runtimes/x87sidecar`, both inside the
@@ -281,3 +281,9 @@ copies fetch the DMG, not the app zip. Before packaging: swap `runtimes/winecx-f
 `scripts/build-x87sidecar.sh` so package-app.sh finds `runtimes/x87sidecar`. An app-layer-only
 update on top of an old runtime would show the toggle disabled ("Needs a newer Gamify runtime")
 and set nothing.
+
+Shipped: `runtimes/winecx-full` rebuilt in place with the patch (instruction-identical to 0.12's
+runtime apart from `ntdll.so`) plus `runtimes/x87sidecar`; `runtime-version`
+`winecx-full-b06c9dee8503` -> `winecx-full-06465f32a22f`, so 0.12 installs fetch the DMG (~574 MB)
+instead of the app zip. First launch after the update refreshes each bottle's prefix once (wine.inf
+is newer), as with every runtime change.

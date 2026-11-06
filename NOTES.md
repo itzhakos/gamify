@@ -3,7 +3,7 @@
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
 - **x87sidecar removes Ori's x87 stutter on the Mac Studio; new per-bottle `x87` setting**
-  (2026-11-06, branch claude/x87sidecar-ori-fadff4, not released, live runtimes not swapped):
+  (2026-11-06, released in 0.13):
   `athei/x87sidecar` (MIT, commit 03581e1; `scripts/build-x87sidecar.sh` -> `runtimes/x87sidecar`)
   hooks Rosetta's `translate_insn` and turns x87 into ARM64 (binary64 math); `--probe` says
   `supported` on macOS 27.2 (26B123). Wine side: `src/patches/loader-rosetta-x87.patch`, ported
@@ -34,7 +34,17 @@ What is live, in one place; everything below it is the chronological log (dead e
   `X87_PRECISE_FAULTS=1`, the sidecar refuses unknown Rosetta builds (game then runs at stock
   speed with a stderr banner) and turns Rosetta's AOT cache off in hooked processes. Ori
   autosaved once during a test run (Ori standing where the user left it; their 16:37 backups
-  untouched). Next: swap the -x87 runtimes in (main session), user test on the M1.
+  untouched). **Released in 0.13** (main session): `runtimes/winecx-full` rebuilt in place from the
+  canonical tree with the patch (`scripts/build-winecx-full.sh`, 3 min 31 s of make). Normalized
+  disassembly (addresses masked) of all 1,725 code files against the 0.12 runtime: only `ntdll.so`
+  differs (+422 instructions); the many byte-level differences are embedded `__FILE__` paths, since
+  0.12's runtime had been built in the `wine-hags-avx-5bfccc` worktree. End to end through the bottle
+  setting: x87bench 4.53 s -> 0.52 s on the rebuilt runtime and 4.62 s -> 0.52 s from inside the mounted
+  0.13 DMG (relocated, re-signed), same checksum; `codesign --verify --deep --strict` ok. runtime-version
+  `winecx-full-b06c9dee8503` -> `winecx-full-06465f32a22f` (full-DMG update). Lesson: another session
+  swapped `runtimes/winecx-full` while a `make install` was writing into it, which left a mixed tree;
+  reinstalled clean. Never swap a runtime tree while a build or packaging run uses it. Still to verify:
+  the M1, the switch on screen, long play, other 32-bit games.
 - **Ori's real bottleneck found + cpus=3 is the fix; the FPS cap is harmful (2026-11-06, for 0.12):**
   clean gameplay A/B on the Mac Studio (M4 Max), game kept macOS-key so the Metal HUD logs `Direct`
   present times. Unity's job system makes one worker thread per core (~ cores-1) that, under Rosetta,
@@ -48,7 +58,7 @@ What is live, in one place; everything below it is the chronological log (dead e
   -> **26.7 fps, every frame >33 ms** (40 is not an even divisor of 60, so it beats against vsync);
   dropped from the Ori recipe, help text now says 30/20/15 and only below the game's own rate.
   Studio Steam bottle set to `cpus 3`, `maxfps` cleared; M1 recommendation = **cpus 3, no FPS cap**.
-  Honest ceiling unchanged: ~25-35 fps on Apple Silicon is the 32-bit-x87-Mono-under-Rosetta tax,
+  Honest ceiling at the time (superseded by x87sidecar in 0.13, bullet above): ~25-35 fps on Apple Silicon is the 32-bit-x87-Mono-under-Rosetta tax,
   no setting removes it (64-bit native impossible: the shipped `oriDE.exe` and all four native
   plugins are 32-bit only). Supersedes the "not proven" caveats in the two bullets below.
   [[rosetta-x87-mono-finding]], [[ori-gameplay-session]].
