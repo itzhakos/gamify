@@ -3,15 +3,15 @@
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
 - **Game Mode now turns on for Wine games (frontmost + full screen); no change in Ori's late frames
-  on the Studio** (2026-11-06 night, side session, branch `claude/reverent-chatelet-ce4078`, not
-  released): macOS labels a game only from a bundle's Info.plist (probes with a hand-made bundle:
-  gamepolicyd `Found game ... labelReason=LSSupportsGameMode (Info.plist)`), so the keys in the
-  loader's embedded plist never counted. Wine's borderless full-screen window does count as full
-  screen; the bundle executable may be a hard link or copy of the loader, not a symlink.
-  `src/patches/ntdll-gamemode-bundle.patch` turns CW HACK 22144's per-program loader link into a
-  minimal bundle, `$TMPDIR/winetemp-<id>/<exe>.app` (bundle id `local.gamify.wine.<exe>`, games
-  category, `LSSupportsGameMode`, `GCSupportsGameMode`), and re-execs the first process of a launch
-  through it; a 32-bit first process goes through x87sidecar with the bundled loader. New
+  on the Studio** (2026-11-06 night, side session, branch `claude/reverent-chatelet-ce4078`,
+  released in 0.14, full DMG): macOS labels a game only from a bundle's Info.plist (probes with a
+  hand-made bundle: gamepolicyd `Found game ... labelReason=LSSupportsGameMode (Info.plist)`), so
+  the keys in the loader's embedded plist never counted. Wine's borderless full-screen window does
+  count as full screen; the bundle executable may be a hard link or copy of the loader, not a
+  symlink. `src/patches/ntdll-gamemode-bundle.patch` turns CW HACK 22144's per-program loader link
+  into a minimal bundle, `$TMPDIR/winetemp-<id>/<exe>.app` (bundle id `local.gamify.wine.<exe>`,
+  games category, `LSSupportsGameMode`, `GCSupportsGameMode`), and re-execs the first process of a
+  launch through it; a 32-bit first process goes through x87sidecar with the bundled loader. New
   `scripts/apply-patches.sh` (both build scripts): the patch rewrites lines of
   loader-rosetta-x87.patch, which broke the old "reverse dry-run = applied" check (it half-applied
   the x87 patch); applied patches are now found by reversing newest first on a scratch copy.
@@ -19,8 +19,12 @@ What is live, in one place; everything below it is the chronological log (dead e
   (Steam bottle, `x87 sidecar`, `cpus 3`, full screen; 3 launches per arm, 2 windows each): > 33 ms
   frames 21 in 6 windows on and 21 off, CPU 68-70% vs 69-72%; background helpers started during
   gameplay took ~1.2 s vs ~0.8 s (Game Mode deprioritising background work). Untested: M1 MacBook,
-  Bluetooth controller (DS4 not connected). Release = full DMG (ntdll.so changes). docs/app.md
-  "Game Mode".
+  Bluetooth controller (DS4 not connected). Released as 0.14 (full DMG, runtime
+  `winecx-full-592c7446dc0c`; only ntdll.so differs from 0.13); on the installed 0.14 Ori runs as
+  `local.gamify.wine.OriDE.exe`, Game Mode on while frontmost, 4 late frames in one ~35 s gameplay
+  window. A program started by the `cross` CLI or a script does not take focus from the frontmost
+  app (same with 0.13's runtime: macOS cooperative activation), so measurements must bring the game
+  to the front (System Events `set frontmost`). docs/app.md "Game Mode", docs/updates.md 0.14.
 - **Ori: full screen removes most of the remaining hitches; Game Mode cannot engage; Steam Input was
   forced on** (2026-11-06 evening, main session, Mac Studio): the user still saw judder at a "59-60 fps"
   average. The HUD log shows why: 1-5% of frames miss a refresh (33-47 ms), in bursts every 1-2 s,

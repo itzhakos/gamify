@@ -287,3 +287,27 @@ runtime apart from `ntdll.so`) plus `runtimes/x87sidecar`; `runtime-version`
 `winecx-full-b06c9dee8503` -> `winecx-full-06465f32a22f`, so 0.12 installs fetch the DMG (~574 MB)
 instead of the app zip. First launch after the update refreshes each bottle's prefix once (wine.inf
 is newer), as with every runtime change.
+
+## 0.14 (2026-11-06): Game Mode, a full-DMG update
+
+`src/patches/ntdll-gamemode-bundle.patch` (docs/app.md "Game Mode") changes the runtime's
+`ntdll.so`, so `runtime-version` changes and installed copies fetch the DMG, not the app zip. No
+app or CrossCore change. Built like 0.13: `runtimes/winecx-full` rebuilt in place on the shared
+tree (`scripts/build-winecx-full.sh`, which now applies `src/patches/*.patch` through
+`scripts/apply-patches.sh`).
+
+Shipped: `runtimes/winecx-full` rebuilt in place with the patch (only `ntdll.so` differs from
+0.13's runtime, `diff -rq` against an APFS clone of it); the rebuilt runtime passed the launch-path
+checks in a scratch bottle (32-bit, 32-bit with `x87 sidecar`, 64-bit on D3DMetal: gamepolicyd
+`Game mode status is now on`, ~60 fps); `runtime-version` `winecx-full-06465f32a22f` ->
+`winecx-full-592c7446dc0c`, so 0.13 installs fetch the DMG (~574 MB) instead of the app zip.
+Verified on the Mac Studio after installing the published DMG with the updater's own helper
+(download, SHA-256, `ditto`, quarantine cleared, swap, ad hoc re-sign): Ori launched in the Steam
+bottle (`x87 sidecar`, `cpus 3`, full screen) runs from `OriDE.exe.app` (bundle id
+`local.gamify.wine.OriDE.exe`), gamepolicyd `Game mode status is now on` while it is frontmost,
+one ~35 s gameplay window 4 frames over 33 ms of 2062 (60.0-60.4 fps, game CPU 66%, no audio
+underruns). A program started from a background process (the `cross` CLI, a script) does not take
+focus from the frontmost app, with 0.13's runtime as with 0.14's (macOS cooperative activation),
+so Game Mode stays off until the game is frontmost (a click on its window); whether a game
+started with Play in Steam comes to the front by itself was not re-tested (activation is
+unchanged from 0.13).
