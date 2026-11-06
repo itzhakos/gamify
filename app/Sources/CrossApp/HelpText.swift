@@ -197,7 +197,9 @@ enum HelpText {
         """
     static let perfFPSCap = """
         Limits the frame rate, for example 60. Steadier, cooler and quieter, and a good match \
-        for frame generation. Leave it empty for no limit.
+        for frame generation. For 32-bit DirectX games on DXMT it also hands pacing to Metal, \
+        which trades about one frame of input lag for even frame times: worth trying on an older \
+        game that runs below 60 and judders (e.g. a 32-bit Unity game). Leave it empty for no limit.
         """
     static let perfCPUs = """
         How many processor cores Windows programs in this bottle see. Games built on Unity 5 \

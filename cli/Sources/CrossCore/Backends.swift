@@ -111,6 +111,14 @@ extension Runtime {
         case .dxmt:
             let conf = dxmtHome.appendingPathComponent("dxmt.conf")
             if FileManager.default.fileExists(atPath: conf.path) { env["DXMT_CONFIG_FILE"] = conf.path }
+            // maxfps also caps DXMT's 32-bit path. DXMT paces the cap through Metal/CoreAnimation
+            // (a steady frame time, at the cost of about one frame of input lag), which is a lever
+            // for the vsync-miss judder a Rosetta-translated game shows when it cannot always hold
+            // 16.7 ms (e.g. 32-bit Unity on x87). DXMT_CONFIG overrides the conf file; caller wins.
+            if (base["DXMT_CONFIG"] ?? "").isEmpty,
+               let maxFPS = bottle.config.performance.maxFPS, maxFPS > 0 {
+                env["DXMT_CONFIG"] = "d3d11.preferredMaxFrameRate=\(maxFPS)"
+            }
         case .d3dmetal, .wined3d:
             break
         }

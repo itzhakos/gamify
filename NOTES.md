@@ -2,6 +2,32 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **Ori played past the prologue on the Mac Studio + frame-cap lever for DXMT** (2026-11-06 night,
+  for 0.11): drove Ori and the Blind Forest DE into real gameplay to answer the user's "the
+  character won't move / it stutters". Findings: (1) **keyboard movement works** in gameplay
+  (held Right/Left, Ori and the camera moved both ways) — the "can't move" was the **prologue**,
+  whose montage has long non-interactive beats; the pause menu's **SKIP PROLOGUE** jumps to the
+  Sunken Glades (autosaved to slot 1, `saveFile0.sav`). (2) The stutter is the bimodal vsync-miss
+  judder measured before (frames are ~16.7 ms or jump to >33 ms, ~12% doubled; GPU ~2 ms, so it is
+  CPU/pacing, the Rosetta + 32-bit-Mono-x87 cost), present even at the title. (3) The game is a
+  Unity build with **Run In Background off**: it pauses render+logic whenever its window is not the
+  macOS key window, which froze the montage for minutes while I looked away and makes the Metal HUD
+  read `inf/0.00` unless the game is frontmost (a measurement trap, and a possible source of hitches
+  if focus is unstable during play). (4) Controller: the game reads XInput only (J2i.Net.XInputWrapper);
+  no XInput pad is present (the DualShock 4 is a Bluetooth HID, logged `Joystick disconnected
+  ("Wireless Controller")`); Wine's winebus sees pads through bundled SDL2, so a **USB-connected**
+  DS4 should appear, with per-game Steam Input off. (5) Audio crackle = dsound underruns
+  (`Probable buffer underrun`, `Overwriting mixing position`) + Core Audio channel-mask fixmes,
+  worse under CPU contention. New lever: **`maxfps` now also caps the 32-bit DXMT path**
+  (`DXMT_CONFIG=d3d11.preferredMaxFrameRate=<n>`, Metal/CoreAnimation-paced: even frame times for
+  ~1 frame of input lag), so a user can trade the judder for steady pacing; default off, D3DMetal's
+  `D3DM_MAX_FPS` unchanged, caller's `DXMT_CONFIG` wins. Verified: `cross env Steam` gains
+  `DXMT_CONFIG=...=50` after `maxfps 50` and loses it on `off`; DXMT logs `Found config env:
+  d3d11.preferredMaxFrameRate=40` and the capped game stays responsive (it switches to Composited
+  presentation, which the Metal HUD cannot measure). Not proven: that the cap or the cpus cut make
+  the game feel smooth enough — only the user, on the M1, can judge; the real smoothness fix remains
+  a 64-bit-native build (SSE, no x87), not attempted (32-bit SteamworksNative plugin blocks a simple
+  player swap). CLI/app/docs updated; [[rosetta-x87-mono-finding]], [[ori-32bit-dxmt-finding]].
 - **CPU cores setting + Debugging mode's HUD log fixed** (2026-11-06, branch
   claude/elegant-hofstadter-ffd27a, not released): Ori and the Blind Forest DE on DXMT renders fine
   on the Mac Studio (GPU ~2 ms/frame) but stutters and crackles: Unity 5.3 starts one "Worker

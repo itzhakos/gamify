@@ -25,7 +25,9 @@ cross - bottle manager and launcher for the winecx runtimes
   cross bottle set <name> cpus <n>|all               CPU cores programs see (WINENCPU; default all, 1 to
                                                      this Mac's count); for Unity 5 games that stutter
   cross bottle set <name> raytracing on|off|default  DirectX ray tracing in D3DMetal (D3DM_SUPPORT_DXR)
-  cross bottle set <name> maxfps <n>|off             frame cap inside D3DMetal (D3DM_MAX_FPS)
+  cross bottle set <name> maxfps <n>|off             frame cap: D3DMetal (D3DM_MAX_FPS) and DXMT's
+                                                     32-bit path (DXMT_CONFIG preferredMaxFrameRate,
+                                                     Metal-paced: steadier frames, ~1 frame of lag)
   cross bottle set <name> hud on|off                 Metal performance HUD (MTL_HUD_ENABLED)
   cross bottle set <name> retina on|off              High Resolution (Retina) mode of the Mac driver
   cross bottle set <name> vendor <hex>|default       GPU vendor id D3DMetal reports (D3DM_VENDOR_ID)
@@ -114,8 +116,8 @@ the Blind Forest keep one busy-waiting worker thread per core and stutter when t
 Honoured from the caller's environment: WINEDEBUG (default -all), WINECX_GRAPHICS (overrides
 cross.json), D3DMETAL_HOME (runtimes/d3dmetal), and any variable a performance setting or
 debugging mode decides (WINEESYNC/WINEMSYNC as a pair, MTL_HUD_ENABLED, MTL_HUD_LOG_ENABLED,
-ROSETTA_ADVERTISE_AVX, WINENCPU, D3DM_*): a non-empty value in the caller's environment wins over
-the bottle's setting.
+ROSETTA_ADVERTISE_AVX, WINENCPU, D3DM_*, DXMT_CONFIG): a non-empty value in the caller's environment
+wins over the bottle's setting.
 """
 
 func fail(_ message: String) -> Never {
