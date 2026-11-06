@@ -1828,6 +1828,29 @@ did but the game suddenly runs smoothly" and during A2 "the game stutters again"
 Side effect: Ori autosaved once during B2 (`saveFile0.sav` at 17:03:15, Ori standing where the
 user had left it); the user's own backups (`saveFile0_bkup0/1.sav`, 16:37) were untouched.
 
+**Second A/B (main session, 2026-11-06 18:45-18:53, released 0.13, nothing else running):** the
+first A/B above did not reproduce. Both arms ran the installed 0.13 runtime (the loader patch is
+inert without the setting); only the bottle's `x87` differed, with `cpus 3` and no cap. Each run:
+title, Return (main menu), Return (Start Game), save-slot screen with slot 1 preselected, Space
+loads the save. Gameplay was confirmed by screenshot and by the game's memory (about 1.1 GB with a
+level loaded, 0.85-0.93 GB at the menus), then 20 s standing at the Sunken Glades Spirit Well and
+about 15 s walking right and left. The save was snapshotted before and restored after each run.
+
+| Run | x87 | CPU | standing fps | > 50 ms | worst | moving fps | > 50 ms | worst |
+|---|---|---|---|---|---|---|---|---|
+| 1 | off | 148% | 59.3 | 0 | 33 ms | 59.1 | 0 | 33 ms |
+| 2 | sidecar | 65% | 59.6 | 1 | 57 ms | 58.9 | 3 | 55 ms |
+| 3 | off | 128% | 59.5 | 0 | 47 ms | 59.1 | 1 | 56 ms |
+| 4 | sidecar | 63% | 59.7 | 0 | 47 ms | 58.8 | 1 | 50 ms |
+
+No dsound underruns and nothing above 100 ms in any run. On the Mac Studio, at this spot, frame
+pacing is the same either way and the sidecar cuts Ori's CPU by more than half; the first A/B's
+stock stalls were most likely caused by other load on the machine at the time (other sessions were
+building runtimes and running Ori then). Not measured: a heavier scene (an earlier stock run at
+another spot in Sunken Glades held only ~35 fps) and the M1, where the CPU saving is the part that
+could matter. An earlier attempt (18:38-18:42) sat on the save-slot screen the whole time because
+its key sequence skipped the main menu: menu numbers are not gameplay numbers.
+
 Not measured: the M1 MacBook (expected to gain at least as much, untested), audio crackle,
 longer play, other 32-bit games, the pause-menu hover stall with the sidecar beyond doubt (see
 B2 above), `X87_PRECISE_FAULTS`. Default stays `off`: one game on one Mac is not enough to turn

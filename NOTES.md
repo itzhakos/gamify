@@ -2,7 +2,7 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
-- **x87sidecar removes Ori's x87 stutter on the Mac Studio; new per-bottle `x87` setting**
+- **x87sidecar halves Ori's CPU (its stutter fix on the Studio did not reproduce); new per-bottle `x87` setting**
   (2026-11-06, released in 0.13):
   `athei/x87sidecar` (MIT, commit 03581e1; `scripts/build-x87sidecar.sh` -> `runtimes/x87sidecar`)
   hooks Rosetta's `translate_insn` and turns x87 into ARM64 (binary64 math); `--probe` says
@@ -44,7 +44,12 @@ What is live, in one place; everything below it is the chronological log (dead e
   `winecx-full-b06c9dee8503` -> `winecx-full-06465f32a22f` (full-DMG update). Lesson: another session
   swapped `runtimes/winecx-full` while a `make install` was writing into it, which left a mixed tree;
   reinstalled clean. Never swap a runtime tree while a build or packaging run uses it. Still to verify:
-  the M1, the switch on screen, long play, other 32-bit games.
+  the M1, the switch on screen, long play, other 32-bit games. **Verified A/B (18:45-18:53, main
+  session, nothing else running, gameplay confirmed by screenshot and memory):** with `cpus 3` Ori holds
+  ~59-60 fps at the Sunken Glades Spirit Well with and without the sidecar (nothing >60 ms or >100 ms,
+  0 underruns in 4 runs); the sidecar cuts Ori's CPU from 128-148% to 63-65%. The first A/B's stock
+  stalls (333-550 ms) did not reproduce, so on the Studio the sidecar is a CPU saving, not a
+  smoothness fix; a heavier scene and the M1 are untested (docs/app.md "x87 acceleration").
 - **Ori's real bottleneck found + cpus=3 is the fix; the FPS cap is harmful (2026-11-06, for 0.12):**
   clean gameplay A/B on the Mac Studio (M4 Max), game kept macOS-key so the Metal HUD logs `Direct`
   present times. Unity's job system makes one worker thread per core (~ cores-1) that, under Rosetta,
