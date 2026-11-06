@@ -197,16 +197,19 @@ enum HelpText {
         """
     static let perfFPSCap = """
         Limits the frame rate, for example 60. Steadier, cooler and quieter, and a good match \
-        for frame generation. For 32-bit DirectX games on DXMT it also hands pacing to Metal, \
-        which trades about one frame of input lag for even frame times: worth trying on an older \
-        game that runs below 60 and judders (e.g. a 32-bit Unity game). Leave it empty for no limit.
+        for frame generation. For 32-bit DirectX games on DXMT it hands pacing to Metal, which \
+        trades about one frame of input lag for even frame times. Use an even divisor of 60 \
+        (30, 20, 15); an odd value like 40 or 50 beats against vsync and runs slower than the \
+        number you set. A cap only helps a game that already drops below it. Leave it empty for no limit.
         """
     static let perfCPUs = """
-        How many processor cores Windows programs in this bottle see. Games built on Unity 5 \
-        and other engines that keep one busy-waiting thread per core (Ori and the Blind Forest \
-        Definitive Edition) stutter and crackle on Apple Silicon when they see every core: try \
-        half the cores. Leave it on All for everything else. Applies to programs started \
-        afterwards; for Steam games, restart Steam.
+        How many processor cores Windows programs in this bottle see. Engines like Unity 5 spawn \
+        one busy-waiting worker thread per core; under Rosetta each spins near 90% during play, so \
+        on Apple Silicon the game stutters, heats up and crackles when it sees every core (Ori and \
+        the Blind Forest Definitive Edition burns about 13 cores uncapped, one at a low setting). \
+        Set a low number such as 3; more cores do not raise the frame rate, they only add spinning \
+        threads. Leave it on All for everything else. Applies to programs started afterwards; for \
+        Steam games, restart Steam.
         """
     static let perfHUD = """
         Shows Apple's performance overlay in the game window: frame rate, GPU time and whether \

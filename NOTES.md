@@ -2,6 +2,41 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **Ori's real bottleneck found + cpus=3 is the fix; the FPS cap is harmful (2026-11-06, for 0.12):**
+  clean gameplay A/B on the Mac Studio (M4 Max), game kept macOS-key so the Metal HUD logs `Direct`
+  present times. Unity's job system makes one worker thread per core (~ cores-1) that, under Rosetta,
+  **busy-wait at ~90% only during gameplay** (they sleep at the menu, which is why the earlier
+  title/menu sweep could not rank cpus). Uncapped (16 cores) in-game = **~1350% CPU, 15 spinning
+  threads**, which saturates an 8-core M1 and starves the dsound mixer -> the crackle. `WINENCPU=3`
+  in-game = **131% CPU, 2 workers, 0 audio underruns**. Frame rate is then **main-thread / x87
+  bound**: ~35 fps in the Sunken Glades with the **GPU idle (1.28 ms)**, and cpus 3/4/8 give the
+  same fps, so cores do not raise it, they only add spin. Sweet spot **cpus=3** (menu 58.5 fps vs
+  cpus 2 at 50.8). The **`maxfps`->DXMT cap is counter-productive here**: `preferredMaxFrameRate=40`
+  -> **26.7 fps, every frame >33 ms** (40 is not an even divisor of 60, so it beats against vsync);
+  dropped from the Ori recipe, help text now says 30/20/15 and only below the game's own rate.
+  Studio Steam bottle set to `cpus 3`, `maxfps` cleared; M1 recommendation = **cpus 3, no FPS cap**.
+  Honest ceiling unchanged: ~25-35 fps on Apple Silicon is the 32-bit-x87-Mono-under-Rosetta tax,
+  no setting removes it (64-bit native impossible: the shipped `oriDE.exe` and all four native
+  plugins are 32-bit only). Supersedes the "not proven" caveats in the two bullets below.
+  [[rosetta-x87-mono-finding]], [[ori-gameplay-session]].
+- **GameHub for Mac 0.8.613 analysed** (2026-11-06, docs/gamehub-analysis.md): GameSir's
+  launcher is a Tauri/Rust app whose DMG holds no Wine (engine, DXMT nightlies and the user's own
+  Apple GPTK DMG are fetched/imported at runtime) but ships five things injected into Wine
+  processes: a GameSir build of `rosettax87_jit` (x87 JIT hook into Rosetta, no entitlements),
+  **MetalDuck** (closed: CAMetalLayer hook with frame generation, `MTLFXSpatialScaler` upscaling,
+  FPS limit, HUD, socket settings), a Rust monitor that spoofs D3DMetal's `DXGIAdapter::GetDesc*`,
+  NvAPI driver version and NGX `FrameGeneration.Available`/`NeedsUpdatedDriver` so DLSS/FG menus
+  appear, an SDL virtual-joystick injector fed by a host HID server, and a libc interposer for
+  overlay "virtual containers" over a shared base prefix. Per-game model: translation layer
+  `rosetta_x64` | **`arm64ec` (Wine ARM64X + FEX, `x87_reduced_precision`)**, graphics stack
+  d3d_metal|dxmt|dxvk|vkd3d_proton|wine_d3d, esync/fsync/msync, `D3DM_MTL4`,
+  `DXMT_EXPERIMENT_DX12_SUPPORT`, blank-media `bypass_av_decode`, winetricks-like dependency
+  steps, a VMProtect `SteamAgent.vmp.exe` replacing Steam.exe (not for us). Leads for Ori's x87
+  stutter: **athei/x87sidecar (MIT)**, successor of rosettax87_jit, cooperative mode needs no
+  root (Wine loader patch + `ROSETTA_X87_PATH`), 6-247x on x87 micro-benchmarks; and
+  **MetalSharp-Wine** (Wine 11.20 ARM64X + FEX, open source) whose notes say Ori no longer
+  stutters, but D3DMetal cannot run under FEX and 32-bit needs macOS 26.4+ plus a Developer-ID
+  signed, notarized app. Ranked list in the doc; nothing implemented.
 - **Ori played past the prologue on the Mac Studio + frame-cap lever for DXMT** (2026-11-06 night,
   for 0.11): drove Ori and the Blind Forest DE into real gameplay to answer the user's "the
   character won't move / it stutters". Findings: (1) **keyboard movement works** in gameplay

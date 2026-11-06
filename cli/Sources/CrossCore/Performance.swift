@@ -44,8 +44,10 @@ public struct PerformanceSettings: Codable, Equatable {
     public var avx: Bool = false
     /// WINENCPU=<n>: programs see n processors (CW HACK 24711 in ntdll: GetSystemInfo,
     /// GetActiveProcessorCount and the affinity masks); nil: all of the Mac's. ntdll ignores
-    /// a value of at least the real count. For engines that keep one busy-waiting worker
-    /// thread per core (Unity 5.3: Ori and the Blind Forest DE stutters with 16, not with 8).
+    /// a value of at least the real count. Engines that keep one busy-waiting worker thread per
+    /// core (Unity 5.3) spin each at ~90% in gameplay under Rosetta: Ori and the Blind Forest DE
+    /// burned ~13 cores uncapped vs ~1 at cpus=3 (0 audio underruns, same frame rate, since it is
+    /// main-thread/x87 bound, so cores do not raise it).
     public var cpus: Int?
     /// D3DM_SUPPORT_DXR=1/0; nil leaves D3DMetal's default (on for M3 and later).
     public var raytracing: Bool?

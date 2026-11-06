@@ -558,11 +558,13 @@ struct PerformanceBox: View {
                 })
     }
 
-    /// CPU cores: All (nil) and the even counts below this Mac's, most first, plus the
-    /// bottle's own value when it is something else (set with the CLI, or on another Mac).
+    /// CPU cores: All (nil), a dense low range (2-6, where cutting Unity-style busy-wait
+    /// worker threads matters most) and the even counts above it, most first, plus the bottle's
+    /// own value when it is something else (set with the CLI, or on another Mac).
     private var cpuChoices: [Int] {
         let host = PerformanceSettings.hostCPUs
-        var counts = Set(stride(from: 2, to: host, by: 2))
+        var counts = Set([2, 3, 4, 5, 6].filter { $0 < host })
+        counts.formUnion(stride(from: 8, to: host, by: 2))
         if let cpus = bottle.config.performance.cpus { counts.insert(cpus) }
         return counts.sorted(by: >)
     }
