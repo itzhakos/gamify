@@ -126,12 +126,18 @@ realigns the stack itself where SSE needs 16 bytes.
 
 The scripts also apply `src/patches/*.patch` to the CrossOver tree before configure (idempotent:
 a patch that already reverses cleanly is skipped), so our own fixes, currently
-`winemac-qt5-opengl.patch` (docs/worms-opengl.md) and since 2026-10-22 the three CrossOver 26.1
-ports (section "Ported from CrossOver 26.1" below), are part of every build.
+`winemac-qt5-opengl.patch` (docs/worms-opengl.md), since 2026-10-22 the three CrossOver 26.1
+ports (section "Ported from CrossOver 26.1" below) and since 2026-11-06
+`loader-rosetta-x87.patch` (x87sidecar for 32-bit processes, docs/app.md "x87 acceleration"),
+are part of every build.
 `src/patches/crossover-25.1.0-over-wine-10.0.diff` is reference only and never applied.
 `WINECX_PREFIX` / `WINECX_BUILD` build a second copy next to the live runtime; the prefix must
 already hold the deps (clone the live runtime with `cp -Rc`; the deps' install names then
-point to the final location).
+point to the final location). `WINECX_SRC` (since 2026-11-06) builds from another copy of the
+Wine tree, e.g. an APFS clone (`cp -Rc upstream/crossover-sources-25.1.0/sources/wine
+upstream/crossover-sources-25.1.0-x87/sources/wine`) to try a new patch without applying it to
+the shared tree the live runtimes come from. A full winecx-full build from such a clone took
+3 min 44 s of make on the M4 Max (configure 22 s, install under 2 min).
 
 x87 / scalar-SSE instruction counts (objdump mnemonics; the residual x87 is the i386 ABI's
 float return in st(0), `long double` and musl's x87 asm in the CRTs):

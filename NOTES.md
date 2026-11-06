@@ -2,6 +2,39 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **x87sidecar removes Ori's x87 stutter on the Mac Studio; new per-bottle `x87` setting**
+  (2026-11-06, branch claude/x87sidecar-ori-fadff4, not released, live runtimes not swapped):
+  `athei/x87sidecar` (MIT, commit 03581e1; `scripts/build-x87sidecar.sh` -> `runtimes/x87sidecar`)
+  hooks Rosetta's `translate_insn` and turns x87 into ARM64 (binary64 math); `--probe` says
+  `supported` on macOS 27.2 (26B123). Wine side: `src/patches/loader-rosetta-x87.patch`, ported
+  from athei/wine cx-26-patched f837e313f7 (no compatdb rules, no bundled default): with
+  `ROSETTA_X87_PATH` set, i386 children and the first process of a launch (CrossOver 25.1 runs an
+  i386 first argument in-process via WoW64, so it re-execs itself) start as `x87sidecar
+  --cooperative <wineloader> ...` and hand over their task port (no root, no password). Built into
+  **`runtimes/winecx-full-x87`** (from an APFS clone `upstream/crossover-sources-25.1.0-x87`, new
+  `WINECX_SRC`; 3 min 44 s of make) and `runtimes/winecx-x87`. **Measured:** `src/x87bench` (250M
+  float ops, i686) x87 build 4.816 s -> 0.562 s (8.6x), SSE build 0.072 s either way, same
+  checksum; first-process, i386-child and unsupported-Rosetta fallback paths verified; the live
+  unpatched runtime ignores the variable. **Ori** (user's Steam bottle as it was, `cpus 3`,
+  patched runtime in every run, only ROSETTA_X87_PATH differing, 45 s standing in gameplay, game
+  frontmost): stock 56.3 fps, 2.9% of intervals >20 ms, 33 >50 ms, 6 >100 ms, worst 333 ms (a
+  second stock run, partly unfocused: 58 >50 ms, worst 550 ms); sidecar 59.7 and 59.8 fps, 0.5%
+  and 0.3%, **0 >50 ms**, worst 33 ms. Pause-menu hovers stock: 3 and 14 frames >100 ms (worst
+  283 ms); sidecar: none >50 ms, but not proven the keys moved the highlight in that run.
+  `sample`: "Rosetta Runtime Routines" share of the main game thread 15.3%/14.9% -> 6.0%/3.7%,
+  of the busy-waiting worker 18.8%/16.9% -> 0%. The user, not told which run was which, wrote
+  "suddenly runs smoothly" during the sidecar run and "stutters again" during the stock one.
+  Setting: `performance.x87` = `off` (default) | `sidecar` -> `ROSETTA_X87_PATH=runtimes/x87sidecar/x87sidecar`
+  only when the bottle's runtime's ntdll.so carries the patch (`Runtime.x87Sidecar`), CLI `cross
+  bottle set <b> x87 sidecar|off`, `bottle show` line (says "no effect" on old runtimes), `cross
+  env`, winecx-env.sh, app toggle "Fast x87 (32-bit)" + hover help, package-app.sh ships
+  runtimes/x87sidecar, LICENSING row; docs/app.md "x87 acceleration". Needs the DMG (runtime
+  change). **Not proven:** the M1 MacBook, audio crackle, long play, other 32-bit games;
+  precision is binary64 (not 80-bit), a memory fault inside translated x87 code aborts unless
+  `X87_PRECISE_FAULTS=1`, the sidecar refuses unknown Rosetta builds (game then runs at stock
+  speed with a stderr banner) and turns Rosetta's AOT cache off in hooked processes. Ori
+  autosaved once during a test run (Ori standing where the user left it; their 16:37 backups
+  untouched). Next: swap the -x87 runtimes in (main session), user test on the M1.
 - **Ori's real bottleneck found + cpus=3 is the fix; the FPS cap is harmful (2026-11-06, for 0.12):**
   clean gameplay A/B on the Mac Studio (M4 Max), game kept macOS-key so the Metal HUD logs `Direct`
   present times. Unity's job system makes one worker thread per core (~ cores-1) that, under Rosetta,

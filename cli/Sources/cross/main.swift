@@ -24,6 +24,8 @@ cross - bottle manager and launcher for the winecx runtimes
   cross bottle set <name> avx on|off                 advertise AVX/AVX2 to games (ROSETTA_ADVERTISE_AVX)
   cross bottle set <name> cpus <n>|all               CPU cores programs see (WINENCPU; default all, 1 to
                                                      this Mac's count); for Unity 5 games that stutter
+  cross bottle set <name> x87 sidecar|off            32-bit programs' x87 math: x87sidecar (ROSETTA_X87_PATH,
+                                                     runtimes with the loader patch) or Rosetta (default off)
   cross bottle set <name> raytracing on|off|default  DirectX ray tracing in D3DMetal (D3DM_SUPPORT_DXR)
   cross bottle set <name> maxfps <n>|off             frame cap: D3DMetal (D3DM_MAX_FPS) and DXMT's
                                                      32-bit path (DXMT_CONFIG preferredMaxFrameRate,
@@ -113,11 +115,16 @@ instead of -all, WINEDEBUG=\(Debug.wineDebug).
 cpus (cross.json "performance.cpus") makes programs see fewer processors (WINENCPU=<n>, read by
 Wine's ntdll at process start; Steam games: after Steam restarts). Unity 5 games such as Ori and
 the Blind Forest keep one busy-waiting worker thread per core and stutter when they see them all.
+x87 (cross.json "performance.x87") sidecar starts every 32-bit program under runtimes/x87sidecar
+(github.com/athei/x87sidecar, MIT), which translates x87 floating point to ARM64 instead of
+Rosetta's slow emulation (32-bit Unity/Mono games); math in binary64 instead of 80-bit. Needs a
+runtime whose ntdll carries src/patches/loader-rosetta-x87.patch (`bottle show` says when it
+does not); X87_PRECISE_FAULTS=1 from the caller for a game that dies with "EmulateForward".
 Honoured from the caller's environment: WINEDEBUG (default -all), WINECX_GRAPHICS (overrides
 cross.json), D3DMETAL_HOME (runtimes/d3dmetal), and any variable a performance setting or
 debugging mode decides (WINEESYNC/WINEMSYNC as a pair, MTL_HUD_ENABLED, MTL_HUD_LOG_ENABLED,
-ROSETTA_ADVERTISE_AVX, WINENCPU, D3DM_*, DXMT_CONFIG): a non-empty value in the caller's environment
-wins over the bottle's setting.
+ROSETTA_ADVERTISE_AVX, WINENCPU, ROSETTA_X87_PATH, D3DM_*, DXMT_CONFIG): a non-empty value in the
+caller's environment wins over the bottle's setting.
 """
 
 func fail(_ message: String) -> Never {
@@ -302,6 +309,12 @@ func main() throws {
                     }
                     bottle.config.performance.cpus = n < host ? n : nil   // all of them is the default
                 }
+            case "x87":
+                switch value.lowercased() {
+                case "sidecar", "on": bottle.config.performance.x87 = .sidecar
+                case "off", "rosetta", "default": bottle.config.performance.x87 = .off
+                default: fail("x87 must be sidecar or off, not '\(value)'")
+                }
             case "raytracing", "dxr":
                 bottle.config.performance.raytracing = value.lowercased() == "default" ? nil : parseSwitch(value, key)
             case "maxfps", "fps":
@@ -324,11 +337,16 @@ func main() throws {
                     guard let id = PerformanceSettings.parseVendorID(value) else { fail("vendor must be a hex id like 0x10DE or default, not '\(value)'") }
                     bottle.config.performance.vendorID = id
                 }
-            default: fail("unknown setting '\(key)' (graphics, graphics32, graphics9, storage, location, sync, metalfx, avx, cpus, raytracing, maxfps, hud, retina, vendor, debug)")
+            default: fail("unknown setting '\(key)' (graphics, graphics32, graphics9, storage, location, sync, metalfx, avx, cpus, x87, raytracing, maxfps, hud, retina, vendor, debug)")
             }
             try bottle.saveConfig()
             let cpusKey = ["cpus", "cpu", "cores"].contains(key.lowercased())
-            print("\(name): \(key) = \(cpusKey ? bottle.config.performance.cpus.map(String.init) ?? "all" : value)")
+            let x87Key = key.lowercased() == "x87"
+            print("\(name): \(key) = \(cpusKey ? bottle.config.performance.cpus.map(String.init) ?? "all" : x87Key ? bottle.config.performance.x87.rawValue : value)")
+            if x87Key, bottle.config.performance.x87 == .sidecar,
+               let problem = Runtime(project: project, name: bottle.config.runtime).x87SidecarProblem {
+                print("\(name): x87 sidecar has no effect yet: \(problem)")
+            }
             if ["graphics32", "graphics9"].contains(key.lowercased()) {
                 if bottle.config.graphics != .d3dmetal {
                     print("\(name): \(key.lowercased()) only matters for D3DMetal bottles; \(bottle.config.graphics.title) covers 32-bit and DirectX 9 programs itself")

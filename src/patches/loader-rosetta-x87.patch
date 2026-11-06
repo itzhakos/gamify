@@ -1,0 +1,420 @@
+loader-rosetta-x87.patch - Gamify patch over CrossOver 25.1.0 Wine (dlls/ntdll/unix), LGPL-2.1-or-later.
+Start i386 processes under the x87sidecar (https://github.com/athei/x87sidecar, MIT) in cooperative
+mode when ROSETTA_X87_PATH names its binary, so that its x87 JIT hook replaces Rosetta's slow
+software emulation of x87 (32-bit Unity/Mono games, NOTES 2026-11-06). Ported from athei/wine
+branch cx-26-patched, commit f837e313f7 "ntdll: HACK: Start i386 processes under the x87sidecar
+cooperatively", without its compatdb.so rules and without a bundled default (only the variable
+turns it on, so the runtime is unchanged without it). Changes against that patch, because
+CrossOver 25.1 on macOS has no preloader and runs an i386 program of the first process in the
+same process (WoW64): an i386 child is re-exec'd as `x87sidecar --cooperative <loader> <args>`
+from preloader_exec() (machine from exec_wineloader), and the first process of a launch (no
+WINESERVERSOCKET) re-execs itself the same way when its first argument is an existing i386 PE
+file (WINEX87SIDECARSTARTED stops a loop). __wine_main hands the task port to the sidecar
+(x87_cooperative_handshake, verbatim from athei) and prints a "RUNNING WITHOUT X87 ACCELERATION"
+banner when the hook could not be installed. coop_proto.h is a verbatim copy of x87sidecar's
+rosetta_loader/src/coop_proto.h (the other end of the Mach handshake). Details: NOTES.md, docs/app.md "x87 acceleration".
+
+--- a/dlls/ntdll/unix/coop_proto.h
++++ b/dlls/ntdll/unix/coop_proto.h
+@@ -0,0 +1,58 @@
++#ifndef X87SIDECAR_COOP_PROTO_H
++#define X87SIDECAR_COOP_PROTO_H
++
++// Wire protocol for the cooperative task-port handshake between a tracee (a
++// binary built with the coop handshake shim, or wine with its handshake hook)
++// and the x87sidecar running in `--cooperative` mode.
++//
++// Rendezvous: the sidecar publishes a Mach receive port in the bootstrap
++// namespace under the name "x87sidecar.<tracee-pid>" (see X87_COOP_ENV). The
++// tracee looks it up and sends its own task + thread control ports, then blocks
++// for a reply. This replaces task_for_pid + ptrace(PT_ATTACHEXC), so the
++// sidecar binary needs no com.apple.security.get-task-allow and is notarizable.
++//
++// This header is plain C so the x86_64 test shim (and wine's unix loader) can
++// include it directly.
++
++#include <mach/mach.h>
++
++// Environment variable carrying the bootstrap service name to the tracee.
++// The sidecar sets it (via setenv) before forking so it survives the execv.
++#define X87_COOP_ENV "X87_SIDECAR_BOOTSTRAP"
++
++// msgh_id of the handshake request (tracee -> sidecar). The reply uses +1.
++#define X87_COOP_MSGH_ID 0x78383721 /* 'x87!' */
++
++// Request: tracee -> sidecar. Complex message with two port descriptors — the
++// tracee's task control port and the handshake thread's control port, both
++// COPY_SEND. msgh_local_port carries a MAKE_SEND_ONCE reply right that the
++// sidecar answers on to unblock the tracee.
++typedef struct {
++    mach_msg_header_t header;
++    mach_msg_body_t body;
++    mach_msg_port_descriptor_t task_port;
++    mach_msg_port_descriptor_t thread_port;
++} x87_coop_request_t;
++
++// Receive buffer on the sidecar side: request + room for the receive trailer.
++typedef struct {
++    x87_coop_request_t req;
++    mach_msg_trailer_t trailer;
++} x87_coop_request_rcv_t;
++
++// Reply: sidecar -> tracee. Its arrival unblocks the tracee. It also carries up
++// to two code ranges the sidecar patched (the translate_insn entry and the
++// injected handler) so the tracee can invalidate its OWN instruction cache for
++// them. This is required in cooperative mode: unlike the default attach (which
++// patches translate_insn before it has ever executed), the cooperative attach
++// happens post-Rosetta-init, when translate_insn is already hot in the i-cache
++// — and a cross-process mach_vm_machine_attribute flush does not reliably make
++// the patch visible. sys_icache_invalidate() on the tracee's own thread (IC
++// IVAU, broadcast inner-shareable) does. len == 0 means "unused slot".
++typedef struct {
++    mach_msg_header_t header;
++    uint64_t icache_addr[2];
++    uint64_t icache_len[2];
++} x87_coop_reply_t;
++
++#endif  // X87SIDECAR_COOP_PROTO_H
+--- a/dlls/ntdll/unix/loader.c
++++ b/dlls/ntdll/unix/loader.c
+@@ -69,6 +69,9 @@
+ # include <mach/mach.h>
+ # include <mach/mach_error.h>
+ # include <mach-o/getsect.h>
++# include <servers/bootstrap.h>
++# include <libkern/OSCacheControl.h>
++# include "coop_proto.h"
+ # include <crt_externs.h>
+ # ifndef _POSIX_SPAWN_DISABLE_ASLR
+ #  define _POSIX_SPAWN_DISABLE_ASLR 0x0100
+@@ -679,11 +682,101 @@
+         free(app_name);
+     }
+ }
++
++/* HACK: start i386 processes under the x87sidecar (https://github.com/athei/x87sidecar)
++ * in cooperative mode, so that its x87 JIT hook replaces Rosetta's slow x87 emulation.
++ * Ported from athei/wine cx-26-patched ("ntdll: HACK: Start i386 processes under the
++ * x87sidecar cooperatively") to CrossOver 25.1, without its compatdb.so rules and
++ * without a bundled default: only ROSETTA_X87_PATH turns it on, so a runtime with
++ * this patch behaves as before unless the variable is set. */
++
++/***********************************************************************
++ *           get_x87_sidecar_path
++ *
++ * The x87sidecar binary from ROSETTA_X87_PATH, or NULL if it is unset or empty.
++ */
++static const char *get_x87_sidecar_path(void)
++{
++    const char *path = getenv( "ROSETTA_X87_PATH" );
++
++    return path && *path ? path : NULL;
++}
++
++/* Read the machine field from a PE file's headers.
++ * Returns IMAGE_FILE_MACHINE_UNKNOWN if the file can't be read or isn't PE. */
++static WORD get_pe_file_machine( const char *path )
++{
++    IMAGE_DOS_HEADER dos;
++    IMAGE_FILE_HEADER file_header;
++    DWORD signature;
++    WORD ret = IMAGE_FILE_MACHINE_UNKNOWN;
++    int fd = open( path, O_RDONLY );
++
++    if (fd == -1) return ret;
++    if (pread( fd, &dos, sizeof(dos), 0 ) == sizeof(dos) &&
++        dos.e_magic == IMAGE_DOS_SIGNATURE &&
++        pread( fd, &signature, sizeof(signature), dos.e_lfanew ) == sizeof(signature) &&
++        signature == IMAGE_NT_SIGNATURE &&
++        pread( fd, &file_header, sizeof(file_header),
++               dos.e_lfanew + sizeof(signature) ) == sizeof(file_header))
++        ret = file_header.Machine;
++    close( fd );
++    return ret;
++}
++
++/***********************************************************************
++ *           get_dos_drive_unix_path
++ *
++ * Map a DOS path with a drive letter, X:\dir\file, to the unix path
++ * <config_dir>/dosdevices/x:/dir/file and resolve it with realpath. Returns
++ * NULL if arg is not such a path or the file does not exist.
++ */
++static char *get_dos_drive_unix_path( const char *arg )
++{
++    char drive = arg[0] | 0x20, *path = NULL, *p, *ret;
++
++    if (!config_dir || drive < 'a' || drive > 'z' || arg[1] != ':') return NULL;
++    asprintf( &path, "%s/dosdevices/%c:/%s", config_dir, drive, arg + 2 );
++    if (!path) return NULL;
++    for (p = path + strlen( config_dir ); *p; p++) if (*p == '\\') *p = '/';
++    ret = realpath( path, NULL );
++    free( path );
++    return ret;
++}
++
++/***********************************************************************
++ *           x87_sidecar_exec
++ *
++ * Exec `<sidecar> --cooperative <loader> <args...>`, where args is the loader's
++ * argv (args[0] is the loader). The sidecar execs the loader in place, keeping
++ * the pid, and the loader hands it its task port in x87_cooperative_handshake().
++ * If the sidecar cannot hook this Rosetta it execs the loader without the hook.
++ * Returns only if the exec failed.
++ */
++static void x87_sidecar_exec( const char *sidecar, char **args, const char *target )
++{
++    static char coop_flag[] = "--cooperative";
++    char **argv;
++    int i, n;
++
++    for (n = 0; args[n]; n++) {}
++    if (!(argv = malloc( (n + 3) * sizeof(*argv) ))) return;
++    argv[0] = (char *)sidecar;
++    argv[1] = coop_flag;
++    for (i = 0; i <= n; i++) argv[i + 2] = args[i];  /* args[0..n-1] + NULL */
++    ERR( "ROSETTA_X87_PATH: attaching x87sidecar --cooperative (%s) for %s\n", sidecar, target );
++    execv( sidecar, argv );
++    ERR( "cannot exec x87sidecar %s: %s\n", sidecar, strerror( errno ) );
++    free( argv );
++}
+ #endif
+ 
+ 
+-static void preloader_exec( char **argv, const char *image_path )
++static void preloader_exec( char **argv, const char *image_path, WORD machine )
+ {
++#ifdef __APPLE__
++    const char *sidecar;
++#endif
+ #ifdef HAVE_WINE_PRELOADER
+     static const char *preloader = "wine-preloader";
+     char *p;
+@@ -724,16 +817,25 @@
+         replace_wineloader_path_with_link( &(argv[1]), image_path );
+ #endif
+ 
++#ifdef __APPLE__
++    /* HACK: an i386 child (exec_wineloader has the machine of its image) runs under
++     * the x87sidecar when ROSETTA_X87_PATH is set. Only for a loader that exists, or
++     * the sidecar would exec nothing and the launch could not fall back to the next one. */
++    if (machine == IMAGE_FILE_MACHINE_I386 && (sidecar = get_x87_sidecar_path()) &&
++        !access( argv[1], X_OK ))
++        x87_sidecar_exec( sidecar, argv + 1, image_path );
++#endif
++
+     execv( argv[1], argv + 1 );
+ }
+ 
+ /* exec the appropriate wine loader for the specified machine */
+ static NTSTATUS loader_exec( char **argv, WORD machine, const char *image_path )
+ {
+-    if (((argv[1] = get_alternate_wineloader( machine )))) preloader_exec( argv, image_path );
++    if (((argv[1] = get_alternate_wineloader( machine )))) preloader_exec( argv, image_path, machine );
+ 
+     argv[1] = strdup( wineloader );
+-    preloader_exec( argv, image_path );
++    preloader_exec( argv, image_path, machine );
+     return STATUS_INVALID_IMAGE_FORMAT;
+ }
+ 
+@@ -2480,7 +2582,178 @@
+ }
+ 
+ 
++#ifdef __APPLE__
++/* HACK: tell the user that the x87sidecar did not install its hook. This is
++ * printed unconditionally, so that it shows even with WINEDEBUG=-all. The
++ * sidecar prints a banner with the same "RUNNING WITHOUT X87 ACCELERATION" text
++ * when it gives up on its own side. */
++static void x87_coop_unhooked( const char *reason )
++{
++    fprintf( stderr,
++             "################################################################\n"
++             "WARNING: X87SIDECAR DID NOT FINISH (%s).\n"
++             "THIS PROCESS IS RUNNING WITHOUT X87 ACCELERATION.\n"
++             "32-BIT GAMES THAT USE X87 MATH WILL BE MUCH SLOWER.\n"
++             "################################################################\n",
++             reason );
++}
++
+ /***********************************************************************
++ *           x87_cooperative_handshake
++ *
++ * HACK: tracee side of the cooperative x87sidecar attach (from athei/wine).
++ *
++ * When the loader was exec'd by `x87sidecar --cooperative` (x87_sidecar_exec), the
++ * sidecar publishes a Mach receive port in the bootstrap namespace under the name
++ * in X87_SIDECAR_BOOTSTRAP ("x87sidecar.<pid>"). This runs in the Rosetta-translated
++ * tracee: look the service up, hand over our task + main-thread control ports, and
++ * block until the sidecar has installed its x87 JIT hook and replies. The reply
++ * carries the code ranges the sidecar patched so we invalidate our OWN instruction
++ * cache for them: a cross-process flush is not reliable once translate_insn is
++ * already hot. This replaces task_for_pid + ptrace, so the sidecar needs no
++ * entitlement and no password.
++ *
++ * A no-op unless X87_SIDECAR_BOOTSTRAP is set and names THIS pid, so it is inert
++ * in processes that merely inherited the variable.
++ */
++static void x87_cooperative_handshake(void)
++{
++    char *name = getenv( X87_COOP_ENV );
++    mach_port_t bootstrap_port = MACH_PORT_NULL;
++    mach_port_t service = MACH_PORT_NULL;
++    mach_port_t reply = MACH_PORT_NULL;
++    x87_coop_request_t msg;
++    struct {
++        x87_coop_reply_t reply;
++        mach_msg_trailer_t trailer;
++        char slack[64];
++    } rep;
++    kern_return_t kr;
++    char reason[64] = "";
++    char *dot;
++    int i;
++
++    if (!name || !*name) return;  /* not running under --cooperative */
++
++    /* Staleness guard: the service name embeds the intended tracee pid. A
++     * process that merely inherited the env var must not hand over its own task port. */
++    dot = strrchr( name, '.' );
++    if (!dot || atoi( dot + 1 ) != (int)getpid()) return;
++
++    if ((kr = task_get_bootstrap_port( mach_task_self(), &bootstrap_port )) != KERN_SUCCESS)
++    {
++        snprintf( reason, sizeof(reason), "NO BOOTSTRAP PORT, ERROR 0X%X", kr );
++        goto done;
++    }
++    kr = bootstrap_look_up( bootstrap_port, name, &service );
++    if (kr != KERN_SUCCESS)
++    {
++        snprintf( reason, sizeof(reason), "SIDECAR SERVICE NOT FOUND, ERROR 0X%X", kr );
++        goto done;
++    }
++
++    /* Reply port we block on until the sidecar has finished its setup. */
++    mach_port_allocate( mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &reply );
++
++    memset( &msg, 0, sizeof(msg) );
++    msg.header.msgh_bits = MACH_MSGH_BITS( MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE ) |
++                           MACH_MSGH_BITS_COMPLEX;
++    msg.header.msgh_size = sizeof(msg);
++    msg.header.msgh_remote_port = service;  /* destination: sidecar */
++    msg.header.msgh_local_port = reply;     /* reply right -> send-once to sidecar */
++    msg.header.msgh_id = X87_COOP_MSGH_ID;
++    msg.body.msgh_descriptor_count = 2;
++    msg.task_port.name = mach_task_self();
++    msg.task_port.disposition = MACH_MSG_TYPE_COPY_SEND;
++    msg.task_port.type = MACH_MSG_PORT_DESCRIPTOR;
++    msg.thread_port.name = mach_thread_self();
++    msg.thread_port.disposition = MACH_MSG_TYPE_COPY_SEND;
++    msg.thread_port.type = MACH_MSG_PORT_DESCRIPTOR;
++
++    kr = mach_msg( &msg.header, MACH_SEND_MSG, sizeof(msg), 0, MACH_PORT_NULL,
++                   MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL );
++    if (kr != KERN_SUCCESS)
++    {
++        snprintf( reason, sizeof(reason), "HANDSHAKE SEND FAILED, ERROR 0X%X", kr );
++        goto done;
++    }
++
++    /* Block until the sidecar has done its install and replies. The receive
++     * buffer needs room for the header AND the kernel-appended trailer. If the
++     * sidecar exits without replying, the kernel sends a MACH_NOTIFY_SEND_ONCE
++     * notification to the reply port instead, which has a different id and size. */
++    memset( &rep, 0, sizeof(rep) );
++    kr = mach_msg( &rep.reply.header, MACH_RCV_MSG, 0, sizeof(rep), reply,
++                   MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL );
++
++    if (kr != KERN_SUCCESS)
++        snprintf( reason, sizeof(reason), "RECEIVE FAILED, ERROR 0X%X", kr );
++    else if (rep.reply.header.msgh_id == MACH_NOTIFY_SEND_ONCE)
++        snprintf( reason, sizeof(reason), "THE SIDECAR EXITED WITHOUT REPLYING" );
++    else if (rep.reply.header.msgh_id != X87_COOP_MSGH_ID + 1 ||
++             rep.reply.header.msgh_size != sizeof(rep.reply))
++        snprintf( reason, sizeof(reason), "UNEXPECTED REPLY, ID 0X%X SIZE %u",
++                  rep.reply.header.msgh_id, rep.reply.header.msgh_size );
++    else
++    {
++        /* Invalidate our own i-cache for the code the sidecar patched, on the
++         * thread that will execute translate_insn (broadcast IC IVAU). */
++        for (i = 0; i < 2; i++)
++            if (rep.reply.icache_len[i] != 0)
++                sys_icache_invalidate( (void *)(uintptr_t)rep.reply.icache_addr[i],
++                                       (size_t)rep.reply.icache_len[i] );
++    }
++
++done:
++    /* Destroy the reply port, so that a late reply finds no receiver. */
++    if (reply != MACH_PORT_NULL) mach_port_mod_refs( mach_task_self(), reply, MACH_PORT_RIGHT_RECEIVE, -1 );
++    if (service != MACH_PORT_NULL) mach_port_deallocate( mach_task_self(), service );
++    if (reason[0]) x87_coop_unhooked( reason );
++    unsetenv( X87_COOP_ENV );
++}
++
++/***********************************************************************
++ *           x87_sidecar_first_process
++ *
++ * HACK: the first process of a launch has no parent to start it under the
++ * x87sidecar, and it runs an i386 program named by its first argument in this
++ * same process (WoW64), so exec_wineloader() never decides for it. Re-exec
++ * through the sidecar when ROSETTA_X87_PATH is set and that argument is an
++ * existing i386 PE file, given as a unix path or as a DOS path with a drive
++ * letter. Anything else (a bare name, start.exe, a 64-bit program) runs as is;
++ * the i386 children it starts are covered by preloader_exec().
++ * WINEX87SIDECARSTARTED marks the loader the sidecar started, hooked or not
++ * (an unsupported Rosetta makes the sidecar exec the loader without the hook),
++ * so that it does not go through the sidecar again.
++ */
++static void x87_sidecar_first_process( int argc, char *argv[] )
++{
++    const char *sidecar;
++    char *path, **new_argv;
++
++    if (getenv( "WINEX87SIDECARSTARTED" ))
++    {
++        unsetenv( "WINEX87SIDECARSTARTED" );
++        return;
++    }
++    if (argc < 2 || getenv( "WINESERVERSOCKET" ) || !(sidecar = get_x87_sidecar_path())) return;
++    if (!(path = realpath( argv[1], NULL )) && !(path = get_dos_drive_unix_path( argv[1] ))) return;
++    if (get_pe_file_machine( path ) == IMAGE_FILE_MACHINE_I386 &&
++        (new_argv = malloc( (argc + 1) * sizeof(*new_argv) )))
++    {
++        new_argv[0] = (char *)wineloader;  /* execv does not change it */
++        memcpy( new_argv + 1, argv + 1, argc * sizeof(*argv) );  /* argv[1..argc-1] + NULL */
++        setenv( "WINEX87SIDECARSTARTED", "1", 1 );
++        x87_sidecar_exec( sidecar, new_argv, path );
++        unsetenv( "WINEX87SIDECARSTARTED" );
++        free( new_argv );
++    }
++    free( path );
++}
++#endif
++
++
++/***********************************************************************
+  *           __wine_main
+  *
+  * Main entry point called by the wine loader.
+@@ -2490,11 +2763,20 @@
+     main_argc = argc;
+     main_argv = argv;
+ 
++#ifdef __APPLE__
++    /* HACK: if we were launched under `x87sidecar --cooperative`, hand our
++     * task port to the sidecar and wait for its x87 JIT hook before running. */
++    x87_cooperative_handshake();
++#endif
++
+     init_paths( argv );
+ 
+     if (!getenv( "WINELOADERNOEXEC" ))  /* first time around */
+     {
+         check_command_line( argc, argv );
++#ifdef __APPLE__
++        x87_sidecar_first_process( argc, argv );
++#endif
+         if (pre_exec())
+         {
+             static char noexec[] = "WINELOADERNOEXEC=1";

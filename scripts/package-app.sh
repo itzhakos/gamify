@@ -9,6 +9,7 @@
 # Layout inside the bundle (CrossCore's Project.locate finds it from the executable):
 #   Gamify.app/Contents/SharedSupport/root/runtimes/<runtime>   our Wine build, relocated
 #   Gamify.app/Contents/SharedSupport/root/runtimes/d3dmetal    Apple D3DMetal 3.0 + its notices
+#   Gamify.app/Contents/SharedSupport/root/runtimes/{dxvk,dxmt,x87sidecar}   when built
 #   Gamify.app/Contents/SharedSupport/root/src/webhelper-shim/steamwebhelper.exe
 #   Gamify.app/Contents/SharedSupport/root/THIRD_PARTY_NOTICES.md
 #   Gamify.app/Contents/Resources/steam-probe.exe   `cross steam check`'s test program (app layer,
@@ -53,7 +54,9 @@ if [ -f "$D3DM/x86_64-windows/nvngx-on-metalfx.dll" ]; then
 fi
 # DXVK (DX9/10/11 over MoltenVK, 32+64-bit) and DXMT (DX10/11 on Metal): optional backends,
 # shipped when built (scripts/build-dxvk.sh, scripts/build-dxmt.sh; docs/dxmt-dxvk.md).
-for b in dxvk dxmt; do
+# x87sidecar (arm64, MIT; scripts/build-x87sidecar.sh): 32-bit programs' x87 math for bottles
+# with performance.x87 = sidecar, on a runtime built with src/patches/loader-rosetta-x87.patch.
+for b in dxvk dxmt x87sidecar; do
     [ -d "$ROOT/runtimes/$b" ] && cp -R "$ROOT/runtimes/$b" "$R/runtimes/$b"
 done
 cp "$ROOT/src/webhelper-shim/steamwebhelper.exe" "$R/src/webhelper-shim/"

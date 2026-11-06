@@ -133,8 +133,9 @@ public struct Runtime {
     /// The environment a process in `bottle` runs with. `base` is the environment
     /// to inherit (WINEDEBUG, DYLD fallback paths and WINECX_GRAPHICS are honoured when
     /// already set, like the script). The bottle's performance settings decide WINEESYNC/
-    /// WINEMSYNC, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX, WINENCPU and the D3DM_* variables,
-    /// except where `base` already sets one (non-empty): the caller's value wins. Debugging
+    /// WINEMSYNC, MTL_HUD_ENABLED, ROSETTA_ADVERTISE_AVX, WINENCPU, ROSETTA_X87_PATH (only on a
+    /// runtime that can use it, `x87Sidecar`) and the D3DM_* variables, except where `base`
+    /// already sets one (non-empty): the caller's value wins. Debugging
     /// mode (`BottleConfig.debug`) swaps WINEDEBUG's `-all` for `Debug.wineDebug` and adds
     /// `Debug.environment` (MTL_HUD_ENABLED=1 over the `hud` setting, MTL_HUD_LOG_ENABLED=1),
     /// again only where the caller sets nothing.
@@ -190,7 +191,9 @@ public struct Runtime {
         // Performance settings (Performance.swift). WINEESYNC and WINEMSYNC are one choice:
         // a caller that sets either keeps both as given.
         let callerSync = PerformanceSettings.syncVariables.contains { nonEmpty(base[$0]) != nil }
-        for (key, value) in bottle.config.performance.environment(graphics: graphics) where nonEmpty(base[key]) == nil {
+        let perf = bottle.config.performance
+        for (key, value) in perf.environment(graphics: graphics, x87Sidecar: perf.x87 == .sidecar ? x87Sidecar : nil)
+        where nonEmpty(base[key]) == nil {
             if callerSync && PerformanceSettings.syncVariables.contains(key) { continue }
             env[key] = value
         }

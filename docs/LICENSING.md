@@ -24,6 +24,7 @@ in the original before a release.
 | DXVK 1.10.3 (CrossOver 25.1 fork + `scripts/dxvk-patches/`, `runtimes/dxvk`, docs/dxmt-dxvk.md) | zlib (`sources/dxvk/LICENSE`, copied to `runtimes/dxvk/LICENSE`) | Yes | Yes | Notice; zlib asks that modified versions be marked as such: say "patched, see scripts/dxvk-patches" |
 | DXMT v0.80 (commit 589adb7 + `scripts/dxmt-patches/`, `runtimes/dxmt`) | **MIT** (`LICENSE` at that commit, copied to `runtimes/dxmt/LICENSE`); contains MIT code from Microsoft (DXBCParser) and DXVK-derived code (zlib), NVIDIA nvapi headers (MIT) | Yes | Yes | Notices for DXMT, DXBCParser, DXVK, nvapi. **Releases after v0.80 are LGPL**: `scripts/build-dxmt.sh` refuses a non-MIT tree; moving past 0.80 means LGPL obligations (source, replaceable DLLs) |
 | LLVM 15.0.7 (static libs inside DXMT's `winemetal.so`) | Apache-2.0 with LLVM Exceptions (`llvm/LICENSE.TXT`) | Yes | Yes | Ship LICENSE.TXT in notices; the LLVM exception only covers compiler runtime pieces, so Apache-2.0 §4 applies to these linked libraries |
+| x87sidecar (github.com/athei/x87sidecar, commit 03581e1, `runtimes/x87sidecar`, `scripts/build-x87sidecar.sh`) | **MIT** (`LICENSE`, copied to `runtimes/x87sidecar/LICENSE`) | Yes | Yes | Notice. Unmodified; a separate arm64 executable that 32-bit programs start under (bottle setting `x87`). The Wine side (`src/patches/loader-rosetta-x87.patch`, ported from athei/wine, LGPL like the rest of Wine) is published with our Wine source |
 | vkd3d-proton (not used) | LGPL-2.1 | Yes, with source | Yes, with source | Notices + source |
 | Wine Mono 9.4.0 / Wine Gecko 2.47.4 | Mono: MIT + LGPL + MS-PL mix; Gecko: MPL-2.0 | Yes, or download on demand | Same | Let Wine download them from WineHQ, as upstream does |
 | **Apple D3DMetal** (GPTK 3.0, `runtimes/d3dmetal`) | Apple GPTK license EA18380 | **Allowed, non-commercial only** | **No** | Free build may bundle (with notices); paid build: user installs GPTK, app extracts |
@@ -127,6 +128,14 @@ the Wine executables, or document how to re-sign).
   one-liners, not the later LGPL upstream commits. DXMT's `winemetal.so` statically links LLVM
   15.0.7 (Apache-2.0 with LLVM Exceptions): ship LLVM's LICENSE.TXT. DXMT's `nvapi64.dll` is
   built against NVIDIA's nvapi headers from github.com/NVIDIA/nvapi (MIT, `License.txt`).
+- 2026-11-06: **x87sidecar** (github.com/athei/x87sidecar, MIT, `LICENSE`: "Copyright (c) 2025
+  Lifeisawful", the rosettax87_jit author it was forked from, at commit 03581e1b5e8465c9e78cea7c20652736a0e02f0a) is built
+  unmodified by `scripts/build-x87sidecar.sh` (only its flat, entitlement-free `x87sidecar`
+  binary is installed, with its LICENSE) and shipped in `runtimes/x87sidecar` by package-app.sh.
+  The Wine loader side, `src/patches/loader-rosetta-x87.patch`, is ported from Alexander
+  Theißen's athei/wine (branch cx-26-patched, commit f837e313f7, a Wine patch, so LGPL-2.1+), and
+  its `coop_proto.h` is a verbatim copy of x87sidecar's `rosetta_loader/src/coop_proto.h` (MIT,
+  compatible). Both go into the Wine source we publish with each release.
 
 ## 4. Wine Mono and Wine Gecko
 

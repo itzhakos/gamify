@@ -8,6 +8,11 @@ nothing was changed in the runtime or the app. Verified facts are marked **verif
 
 ## Status (2026-10-22, evening)
 
+Update 2026-11-06: 32-bit games' x87 math (Rosetta emulates it ~97x slower than SSE; Unity 5's
+Mono JIT emits it) now has a per-bottle lever, `x87 = sidecar` (athei/x87sidecar, a Wine loader
+patch, `runtimes/x87sidecar`); Ori and the Blind Forest DE went from 33 frames >50 ms per 45 s
+of gameplay to none on the M4 Max. docs/app.md "x87 acceleration", NOTES.md.
+
 Stages 1 and 2 of the plan below are merged into `main` and live:
 - Per-bottle Performance settings (`performance` in cross.json, `cross bottle show|set`,
   Performance box in the app, `cross cache clear`) and the DLSS→MetalFX plumbing: nvngx
