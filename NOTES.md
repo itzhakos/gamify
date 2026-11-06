@@ -2,6 +2,26 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **Ori: full screen removes most of the remaining hitches; Game Mode cannot engage; Steam Input was
+  forced on** (2026-11-06 evening, main session, Mac Studio): the user still saw judder at a "59-60 fps"
+  average. The HUD log shows why: 1-5% of frames miss a refresh (33-47 ms), in bursts every 1-2 s,
+  windowed, with or without x87sidecar, even at the menu (display: LG 3440x1440 at 60 Hz, so not a
+  refresh mismatch). **Full screen** (Unity `-screen-fullscreen 1 -screen-width 3440 -screen-height
+  1440`; Unity then saves it under HKCU\Software\Microsoft Studios\Ori And The Blind Forest: Definitive
+  Edition, "Screenmanager ..." values, so Steam launches keep it) cuts late frames per ~35 s gameplay
+  window from 59-73 (windowed, sidecar) to 6-9 (full screen, sidecar) and 12 (full screen, stock, with
+  one 157 ms spike); best = full screen + sidecar; GPU at native 3440x1440 3.7 ms. **Game Mode stays
+  Off** even full screen: the game process has no app bundle (`lsappinfo`: bundleID NULL), so the game
+  category that loader-plist-gamemode.patch embeds in wineloader's `__info_plist` is never read, and
+  Wine's full-screen window is a borderless layer-27 window, not a native full-screen space; Game Mode
+  would need Wine launched from an .app bundle (follow-up). **Controller:** Ori's per-game Steam Input
+  was forced on (`localconfig.vdf` apps/387290 `UseSteamControllerConfig` "2"; Split Fiction 2001120
+  too) while Wine's winebus also exposes the DualShock 4 to the game (Enum `WINEBUS\VID_054C&PID_09CC`,
+  BT 1C:A0:B8:E9:F2:3E), so the pad could reach Ori twice; set to "0" with Steam stopped (backup in the
+  session scratchpad), Steam kept it after restart. Untested with the pad (it was off); revert in Steam:
+  Ori > Properties > Controller. Measuring Ori: title > Return > main menu > Return (Start Game) > save
+  slots (last slot preselected) > Space; gameplay = game RSS >1 GB, menus 0.85-0.93 GB. Studio left at:
+  Steam bottle `cpus 3`, `x87 sidecar`; Ori full screen 3440x1440; Ori's Steam Input off.
 - **x87sidecar halves Ori's CPU (its stutter fix on the Studio did not reproduce); new per-bottle `x87` setting**
   (2026-11-06, released in 0.13):
   `athei/x87sidecar` (MIT, commit 03581e1; `scripts/build-x87sidecar.sh` -> `runtimes/x87sidecar`)
