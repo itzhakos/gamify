@@ -1709,6 +1709,25 @@ no root and no password; Wine's loader must start each 32-bit process through it
 - 64-bit programs never start under the sidecar (they use SSE for float math anyway). Every
   32-bit process does, one sidecar process each (a few MB), Steam's 32-bit helpers included.
 
+### Requirements (plainly)
+- An Apple Silicon Mac with Rosetta 2. Every M-series chip runs the same Rosetta, but the
+  sidecar finds its hook sites in the installed Rosetta by pattern and refuses one it does not
+  recognise; the game then runs as before (stock speed) and its stderr/launch log says
+  `RUNNING WITHOUT X87 ACCELERATION`. Verified here only on an M4 Max with macOS 27.2 (26B123);
+  x87sidecar's own CI runs macOS 15, 26 and 27, and the binary is built for macOS 14.0 or later.
+  **Not tested on an M1** or on another macOS build: run
+  `<Gamify.app>/Contents/SharedSupport/root/runtimes/x87sidecar/x87sidecar --probe` there; it
+  prints `supported` (exit 0) when the hook can be installed. One probe line differs by chip
+  generation (`MXCSR FTZ/DAZ in FPCR.FZ/FIZ (FEAT_AFP)` here); it only matters with
+  `X87_IGNORE_FTZ_DAZ=1`, which is off.
+- No root, no entitlements, no developer-tools password, no SIP change: cooperative mode, the
+  ad hoc signed flat binary (the `x87sidecar_entitled` build is not used).
+- 32-bit (i386) Windows programs only, in our new-style WoW64 (i386 code inside the 64-bit Wine
+  process, Rosetta's 32-bit compatibility mode): verified with `src/x87bench` and Ori. 64-bit
+  programs are never started under it.
+- A Gamify runtime built with `loader-rosetta-x87.patch` plus `runtimes/x87sidecar`, i.e. a
+  release installed from the DMG; on an older runtime the setting does nothing.
+
 ### Caveats
 - Precision: binary64 arithmetic. At the 53-bit precision control Windows programs run with,
   results match real x87 while values stay in the binary64 exponent range; at 64- or 24-bit
