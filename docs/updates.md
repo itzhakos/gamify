@@ -270,3 +270,14 @@ CLI and the app only, so `runtime-version` stayed `winecx-full-b06c9dee8503` and
 `releases/latest/download/latest.json` redirect still served 0.9.1 right after the publish.
 Trigger: Ori and the Blind Forest DE (32-bit) on the user's M1 MacBook Pro; not yet confirmed
 there.
+
+## Next release with x87sidecar: full-DMG update
+
+The `x87` setting (docs/app.md "x87 acceleration") needs a runtime whose ntdll carries
+`src/patches/loader-rosetta-x87.patch` plus the new `runtimes/x87sidecar`, both inside the
+`runtime-version` digest, so the release that ships it changes `runtime-version` and installed
+copies fetch the DMG, not the app zip. Before packaging: swap `runtimes/winecx-full-x87` (and
+`winecx-x87`) in for the live trees, or rebuild with the patch, and run
+`scripts/build-x87sidecar.sh` so package-app.sh finds `runtimes/x87sidecar`. An app-layer-only
+update on top of an old runtime would show the toggle disabled ("Needs a newer Gamify runtime")
+and set nothing.

@@ -423,6 +423,10 @@ CrossOver 26.1: rebuild and swap".
 | `ntdll-emulate-xgetbv.patch` | CW HACK 23427, 26.1 `dlls/ntdll/unix/signal_x86_64.c` | Emulates `XGETBV` (xcr0) in the invalid-opcode handler |
 | `loader-plist-gamemode.patch` | ours (not in 26.1) | Game Mode keys in the wineloader's embedded Info.plist |
 
+Since 2026-11-06 also `loader-rosetta-x87.patch`, not a CodeWeavers hack: ported from
+athei/wine (cx-26-patched, f837e313f7), it starts 32-bit processes under x87sidecar when
+`ROSETTA_X87_PATH` is set (docs/app.md "x87 acceleration").
+
 ### win32u-d3dkmt-hwsched.patch (HAGS, CW HACK 24905)
 
 - Wine 10.0's `NtGdiDdDDIQueryAdapterInfo` was a stub returning `STATUS_NOT_IMPLEMENTED` for

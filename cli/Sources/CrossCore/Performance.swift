@@ -22,6 +22,18 @@ public enum SyncMode: String, Codable, CaseIterable {
     public var text: String { self == .auto ? "auto (\(effective.rawValue))" : rawValue }
 }
 
+/// What 32-bit (i386) programs run their x87 floating point on. Rosetta 2 emulates x87 in
+/// software, ~97x slower than SSE (NOTES 2026-11-06): 32-bit Unity 5/Mono games (Ori and the
+/// Blind Forest DE) do all their C# float math in x87 and stutter. `sidecar` starts every
+/// i386 process under x87sidecar (github.com/athei/x87sidecar, MIT, runtimes/x87sidecar),
+/// whose hook in Rosetta's translator turns x87 into ARM64 code computed in binary64 instead
+/// of 80-bit; it needs a runtime whose ntdll carries src/patches/loader-rosetta-x87.patch
+/// (`Runtime.x87Sidecar`). 64-bit programs never use x87 for float math and are unaffected.
+public enum X87Mode: String, Codable, CaseIterable {
+    case off
+    case sidecar
+}
+
 /// Per-bottle performance settings, `performance` in cross.json. Every field has a
 /// default, so a cross.json without the key (or with only some fields) loads unchanged.
 /// Mapping (docs/app.md "Performance settings"): environment variables through
@@ -47,6 +59,9 @@ public struct PerformanceSettings: Codable, Equatable {
     /// a value of at least the real count. For engines that keep one busy-waiting worker
     /// thread per core (Unity 5.3: Ori and the Blind Forest DE stutters with 16, not with 8).
     public var cpus: Int?
+    /// ROSETTA_X87_PATH=<runtimes/x87sidecar/x87sidecar> with `sidecar`, when the runtime can
+    /// use it (`environment(graphics:x87Sidecar:)`); `off`: Rosetta's own x87 emulation.
+    public var x87: X87Mode = .off
     /// D3DM_SUPPORT_DXR=1/0; nil leaves D3DMetal's default (on for M3 and later).
     public var raytracing: Bool?
     /// D3DM_MAX_FPS; nil: no cap.
@@ -70,6 +85,7 @@ public struct PerformanceSettings: Codable, Equatable {
         metalfx = try c.decodeIfPresent(Bool.self, forKey: .metalfx) ?? true
         avx = try c.decodeIfPresent(Bool.self, forKey: .avx) ?? false
         cpus = try c.decodeIfPresent(Int.self, forKey: .cpus)
+        x87 = try c.decodeIfPresent(X87Mode.self, forKey: .x87) ?? .off
         raytracing = try c.decodeIfPresent(Bool.self, forKey: .raytracing)
         maxFPS = try c.decodeIfPresent(Int.self, forKey: .maxFPS)
         hud = try c.decodeIfPresent(Bool.self, forKey: .hud) ?? false
@@ -99,14 +115,17 @@ public struct PerformanceSettings: Codable, Equatable {
     }
 
     /// Variables these settings decide: a value sets it, nil removes it. D3DMetal's own
-    /// variables are only set for D3DMetal bottles.
-    public func environment(graphics: Graphics) -> [String: String?] {
+    /// variables are only set for D3DMetal bottles. `x87Sidecar` is the binary the bottle's
+    /// runtime can start i386 processes under (`Runtime.x87Sidecar`), nil when it cannot:
+    /// then `x87 = sidecar` sets nothing and the runtime behaves as without the setting.
+    public func environment(graphics: Graphics, x87Sidecar: URL? = nil) -> [String: String?] {
         let d3dmetal = graphics == .d3dmetal
         var env: [String: String?] = [
             "WINEESYNC": sync.effective == .esync ? "1" : nil,
             "WINEMSYNC": sync.effective == .msync ? "1" : nil,
             "ROSETTA_ADVERTISE_AVX": avx ? "1" : nil,
             "WINENCPU": nil,
+            "ROSETTA_X87_PATH": x87 == .sidecar ? x87Sidecar?.path : nil,
             "MTL_HUD_ENABLED": hud ? "1" : "0",
             "D3DM_ENABLE_METALFX": d3dmetal && metalfx ? "1" : nil,
             "D3DM_VENDOR_ID": effectiveVendorID(graphics: graphics).map(PerformanceSettings.hex),
@@ -123,6 +142,47 @@ public struct PerformanceSettings: Codable, Equatable {
 
     /// Both sync variables are one choice: a caller that sets either keeps both as it gave them.
     public static let syncVariables: Set<String> = ["WINEESYNC", "WINEMSYNC"]
+}
+
+// MARK: - x87sidecar
+
+extension Runtime {
+    /// runtimes/x87sidecar (scripts/build-x87sidecar.sh): the x87sidecar binary + LICENSE.
+    public var x87SidecarHome: URL { project.runtimes.appendingPathComponent("x87sidecar") }
+    public var x87SidecarBinary: URL { x87SidecarHome.appendingPathComponent("x87sidecar") }
+
+    /// Whether this runtime's ntdll starts i386 processes through ROSETTA_X87_PATH
+    /// (src/patches/loader-rosetta-x87.patch): its ntdll.so names the handshake variable.
+    /// Read once per ntdll.so file (path, size and date), so a rebuilt runtime is looked at again.
+    public var hasX87SidecarLoader: Bool {
+        let ntdll = unixDir.appendingPathComponent("ntdll.so")
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: ntdll.path) else { return false }
+        let key = "\(ntdll.path)|\(attrs[.size] ?? 0)|\((attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)"
+        Runtime.x87LoaderLock.lock()
+        defer { Runtime.x87LoaderLock.unlock() }
+        if let known = Runtime.x87LoaderCache[key] { return known }
+        let found = (try? Data(contentsOf: ntdll, options: .mappedIfSafe))
+            .map { $0.range(of: Data("X87_SIDECAR_BOOTSTRAP".utf8)) != nil } ?? false
+        Runtime.x87LoaderCache[key] = found
+        return found
+    }
+
+    private static var x87LoaderCache: [String: Bool] = [:]
+    private static let x87LoaderLock = NSLock()
+
+    /// The sidecar bottles with `x87 = sidecar` run their i386 processes under: nil unless this
+    /// runtime carries the loader patch and runtimes/x87sidecar holds the binary.
+    public var x87Sidecar: URL? {
+        guard FileManager.default.isExecutableFile(atPath: x87SidecarBinary.path), hasX87SidecarLoader else { return nil }
+        return x87SidecarBinary
+    }
+
+    /// Why `x87 = sidecar` does nothing in a bottle on this runtime, nil when it works.
+    public var x87SidecarProblem: String? {
+        if !hasX87SidecarLoader { return "the \(name) runtime cannot start programs under x87sidecar (it needs a runtime built with loader-rosetta-x87.patch)" }
+        if !FileManager.default.isExecutableFile(atPath: x87SidecarBinary.path) { return "x87sidecar is not installed (\(x87SidecarBinary.path))" }
+        return nil
+    }
 }
 
 // MARK: - Files and registry

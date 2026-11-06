@@ -208,6 +208,18 @@ enum HelpText {
         half the cores. Leave it on All for everything else. Applies to programs started \
         afterwards; for Steam games, restart Steam.
         """
+    static let perfX87 = """
+        Speeds up old 32-bit games that do their math the 1990s way (x87), such as Unity 5 games \
+        like Ori and the Blind Forest Definitive Edition: the Mac's Intel translator handles that \
+        math very slowly, which shows up as stutter and menus that hang for a moment. With this on, \
+        32-bit programs start through x87sidecar, a free add-on that translates that math much \
+        faster. Results can differ in the last digits; if a game crashes or misbehaves, turn it \
+        off. 64-bit games are not affected. Applies to programs started afterwards; for Steam \
+        games, restart Steam.
+        """
+    static let perfX87Unavailable = """
+        Needs a newer Gamify runtime. Download the full Gamify installer (the disk image) to get it.
+        """
     static let perfHUD = """
         Shows Apple's performance overlay in the game window: frame rate, GPU time and whether \
         MetalFX is active. Useful while tuning, off for playing. Debugging mode shows it too.

@@ -37,6 +37,13 @@ extension AppModel {
         }
     }
 
+    /// Why the bottle's runtime cannot run 32-bit programs under x87sidecar (the x87 toggle
+    /// is then off and disabled), nil when it can.
+    func x87SidecarProblem(for bottle: Bottle) -> String? {
+        guard let project else { return "no project" }
+        return Runtime(project: project, name: bottle.config.runtime).x87SidecarProblem
+    }
+
     /// The shader cache folder of a program's exe, nil when D3DMetal has not made one.
     func shaderCache(for program: Program) -> ShaderCache.Entry? {
         shaderCaches[ShaderCache.exeName(program.exe).lowercased()]

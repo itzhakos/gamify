@@ -214,7 +214,7 @@ For a Finder-like launch from a terminal:
 - Program list since 2026-10-20 (see "Stores and programs"); still no icons, no
   winetricks/DLL overrides UI, no free-form per-bottle env overrides (WINEDEBUG comes from the
   app's environment, or from Debugging mode since 2026-10-23; sync, HUD, AVX and the D3DM_* variables are Performance settings since
-  2026-10-22, CPU cores (WINENCPU) since 2026-11-06), no app icon.
+  2026-10-22, CPU cores (WINENCPU) and x87 acceleration (ROSETTA_X87_PATH) since 2026-11-06), no app icon.
 - The job list is in memory only; logs stay on disk. A game started by Steam is
   Steam's child, not a job, so use Kill Bottle for it.
 - The app bundle must stay inside the checkout, or have its root set in Settings.
@@ -945,6 +945,7 @@ CW HACK 24905, another session's work in src/patches).
 | `metalfx` | on | D3DMetal only: `D3DM_ENABLE_METALFX=1`, `D3DM_VENDOR_ID=0x10DE`; `system32\nvngx.dll` + `nvapi64.dll` (copied from `runtimes/d3dmetal/x86_64-windows` when missing); `HKLM\Software\NVIDIA Corporation\Global\NGXCore\FullPath = C:\windows\system32` (REG_SZ) | Off: the variables are not set; files and registry value stay. With the NVIDIA vendor id Streamline-based games accept the adapter (it still says "AMD Compatibility Mode"). |
 | `avx` | off | `ROSETTA_ADVERTISE_AVX=1` | Without the XGETBV hack (stage 2, CW HACK 23427) a game that executes `xgetbv` after seeing AVX can still die. |
 | `cpus` | absent (= all) | `WINENCPU=<n>` | Since 2026-11-06: the processors programs see (CW HACK 24711 in ntdll). See "CPU cores" below. |
+| `x87`: `off` \| `sidecar` | off | `ROSETTA_X87_PATH=<runtimes/x87sidecar/x87sidecar>`, only on a runtime whose ntdll carries `src/patches/loader-rosetta-x87.patch` | Since 2026-11-06: every 32-bit process starts under x87sidecar, which replaces Rosetta's x87 emulation. See "x87 acceleration" below. |
 | `raytracing` | default (absent) | `D3DM_SUPPORT_DXR=1` / `0` | D3DMetal only; absent = D3DMetal's default (on for M3 and later). |
 | `maxFPS` | absent | `D3DM_MAX_FPS=<n>`; on a DXMT backend also `DXMT_CONFIG=d3d11.preferredMaxFrameRate=<n>` | D3DMetal, and (since 2026-11-06) the 32-bit DXMT path: DXMT paces the cap through Metal/CoreAnimation (even frame times, ~1 frame of added latency), a lever for the vsync-miss judder a Rosetta-translated game shows below 60 fps. |
 | `hud` | off | `MTL_HUD_ENABLED=1` (off: `0`, as before) | Debugging mode sets `1` whatever this says (since 2026-11-06, "Debugging mode and log export"). |
@@ -964,6 +965,7 @@ cross bottle set <name> sync auto|esync|msync      (auto = msync)
 cross bottle set <name> metalfx on|off             (alias dlss)
 cross bottle set <name> avx on|off
 cross bottle set <name> cpus <n>|all               (aliases cpu, cores; 1 to this Mac's cores; since 2026-11-06)
+cross bottle set <name> x87 sidecar|off            (also on/rosetta; since 2026-11-06)
 cross bottle set <name> raytracing on|off|default  (alias dxr)
 cross bottle set <name> maxfps <n>|off             (alias fps)
 cross bottle set <name> hud on|off
@@ -982,7 +984,7 @@ cross cache clear <bottle> [<exe name>]            without an exe: list the cach
   (`PerformanceBox` in BottleView.swift) with Sync (Automatic/ESync/MSync), DLSS via MetalFX
   ("Games that offer DLSS get MetalFX upscaling and frame generation"; disabled for
   wined3d), Advertise AVX, Ray tracing (Default/On/Off), FPS cap (empty = off), CPU cores
-  (since 2026-11-06), Metal HUD, Retina (High Resolution), and the note that settings apply to
+  (since 2026-11-06), Fast x87 (32-bit) (since 2026-11-06), Metal HUD, Retina (High Resolution), and the note that settings apply to
   programs started afterwards.
   Each change saves cross.json (`AppModel.setPerformance`); a metalfx/retina change, a switch
   to D3DMetal and a new bottle's finished wineboot run `applyPerformance` in the background.
@@ -1167,6 +1169,8 @@ one constant or function per text, grouped by view as below). *Italics* stand fo
 | Ray tracing picker | Lets DirectX 12 games use ray tracing (realistic lighting and reflections) through D3DMetal. Default: on with an M3 chip or newer. Set it Off when a game turns ray tracing on by itself and runs slowly. |
 | FPS cap | Limits the frame rate, for example 60. Steadier, cooler and quieter, and a good match for frame generation. For 32-bit DirectX games on DXMT it also hands pacing to Metal (even frame times for ~1 frame of input lag); worth trying on an older game that runs below 60 and judders. Leave it empty for no limit. |
 | CPU cores picker | How many processor cores Windows programs in this bottle see. Games built on Unity 5 and other engines that keep one busy-waiting thread per core (Ori and the Blind Forest Definitive Edition) stutter and crackle on Apple Silicon when they see every core: try half the cores. Leave it on All for everything else. Applies to programs started afterwards; for Steam games, restart Steam. |
+| Fast x87 (32-bit) | Speeds up old 32-bit games that do their math the 1990s way (x87), such as Unity 5 games like Ori and the Blind Forest Definitive Edition: the Mac's Intel translator handles that math very slowly, which shows up as stutter and menus that hang for a moment. With this on, 32-bit programs start through x87sidecar, a free add-on that translates that math much faster. Results can differ in the last digits; if a game crashes or misbehaves, turn it off. 64-bit games are not affected. Applies to programs started afterwards; for Steam games, restart Steam. |
+| Fast x87 (32-bit) (disabled, old runtime) | Needs a newer Gamify runtime. Download the full Gamify installer (the disk image) to get it. |
 | Metal HUD | Shows Apple's performance overlay in the game window: frame rate, GPU time and whether MetalFX is active. Useful while tuning, off for playing. Debugging mode shows it too. |
 | Retina (High Resolution) | Renders at the display's full resolution. Sharper, but roughly four times the pixels, so lower frame rates. Off scales a half-resolution image up, which is what most games want. Change it only while nothing runs in this bottle. |
 
@@ -1663,3 +1667,150 @@ something else (an odd count set with the CLI, or a count from a bigger Mac). Sa
   here); the picker writes through the same `setPerformance` path as the other controls.
 - **Not measured with the setting itself**: the Ori numbers above were taken with `WINENCPU` set
   by hand on the user's bottle, before this setting existed.
+
+## x87 acceleration (2026-11-06)
+Why: Rosetta 2 runs x87 floating point (the 8087 register stack) in software. Native x86 code
+built since the 2000s uses SSE, but Unity 5's 32-bit Mono JIT emits x87 for every float
+operation of a game's C# code, so 32-bit Unity games (Ori and the Blind Forest Definitive
+Edition) stutter and stall 200-300 ms on menu hovers on Apple Silicon (NOTES.md 2026-11-06:
+`sample` puts the main thread in libRosettaRuntime's x87 routines; a float loop built with
+`-mfpmath=387` ran ~97x slower than with SSE in the bottle). Gamify's own Wine builds its i386
+DLLs with SSE since 2026-10-17; the game's JIT code cannot be rebuilt.
+
+[x87sidecar](https://github.com/athei/x87sidecar) (Alexander Theißen, MIT; successor of
+Lifeisawful's rosettax87_jit, which GameSir's GameHub ships, docs/gamehub-analysis.md) hooks
+libRosettaRuntime's `translate_insn`: runs of x87 instructions go over Mach IPC to a native
+arm64 process that returns ARM64 code for them, computed in binary64 instead of 80-bit. In
+cooperative mode the target hands over its own task port, so the sidecar needs no entitlement,
+no root and no password; Wine's loader must start each 32-bit process through it.
+
+### Pieces
+- `src/patches/loader-rosetta-x87.patch` (ntdll unix side, applied by both build scripts):
+  ported from athei/wine `cx-26-patched` commit f837e313f7 to our CrossOver 25.1 tree. With
+  `ROSETTA_X87_PATH=<sidecar>` set, an i386 child (`exec_wineloader` knows the machine of its
+  image) is exec'd as `<sidecar> --cooperative <wineloader> <args>`, and so is the first process
+  of a launch when its first argument is an existing i386 PE file (CrossOver 25.1 on macOS has
+  no preloader and runs that program in the same WoW64 process, so athei's version, which
+  relies on a re-exec, would never see it; `WINEX87SIDECARSTARTED` stops a loop when the sidecar
+  execs the loader without the hook). The loader then hands its task port to the sidecar in
+  `__wine_main` (`x87_cooperative_handshake`, as athei's) and waits for the hook. Without the
+  variable nothing changes; athei's compatdb.so rules and bundled default are left out. When the
+  hook cannot be installed (an unknown Rosetta), the program runs without it and stderr says
+  `RUNNING WITHOUT X87 ACCELERATION`.
+- `runtimes/x87sidecar/` (`scripts/build-x87sidecar.sh`, commit 03581e1): the flat
+  `x87sidecar` binary (arm64, ad hoc signed, no entitlements), its LICENSE and a VERSION file
+  with the `--probe` result. `scripts/package-app.sh` ships it when built; docs/LICENSING.md row.
+- `PerformanceSettings.x87` (`off` default | `sidecar`, cross.json `"performance": {"x87":
+  "sidecar"}`), mapped in `environment(graphics:x87Sidecar:)`. `Runtime.x87Sidecar` is the
+  binary only when the bottle's runtime carries the patch (`hasX87SidecarLoader`: its
+  `ntdll.so` contains `X87_SIDECAR_BOOTSTRAP`, read once per file) and runtimes/x87sidecar holds
+  it, so a bottle on an older runtime gets no variable at all; `bottle show` then says why.
+  A caller's `ROSETTA_X87_PATH` wins, like every performance variable.
+- 64-bit programs never start under the sidecar (they use SSE for float math anyway). Every
+  32-bit process does, one sidecar process each (a few MB), Steam's 32-bit helpers included.
+
+### Caveats
+- Precision: binary64 arithmetic. At the 53-bit precision control Windows programs run with,
+  results match real x87 while values stay in the binary64 exponent range; at 64- or 24-bit
+  precision control, for 64-bit integers above 2^53 in arithmetic and for sequences that carry
+  extra precision between instructions (`fyl2x`-based `pow`) they differ in the last bits.
+- A guest memory fault inside sidecar-translated x87 code aborts the process with `rosetta
+  error: unexpectedly need to EmulateForward on a synchronous exception` where stock Rosetta
+  would call the program's handler. A game that dies that way can run with
+  `X87_PRECISE_FAULTS=1` in the caller's environment (costs up to 7% on x87 loops and much more
+  on x87 stores into write-combined memory).
+- The sidecar refuses a Rosetta runtime whose hook sites or assumptions it does not recognise
+  (`runtimes/x87sidecar/x87sidecar --probe` shows the verdict; run it after a macOS update);
+  the program then runs at stock speed.
+- The sidecar sets `ROSETTA_DISABLE_AOT=1` for the hooked process (the hook lives in Rosetta's
+  JIT path), so Wine's own x86_64 code in that process is JIT-translated rather than taken from
+  Rosetta's AOT cache, and its children inherit that.
+
+### CLI
+```
+cross bottle set <name> x87 sidecar|off
+cross bottle show <name>     x87  off      32-bit programs: x87 math emulated by Rosetta (sidecar = x87sidecar, ROSETTA_X87_PATH)
+                             x87  sidecar  ROSETTA_X87_PATH=<root>/runtimes/x87sidecar/x87sidecar: 32-bit programs start under x87sidecar
+                             x87  sidecar  no effect: the winecx-full runtime cannot start programs under x87sidecar (it needs a runtime built with loader-rosetta-x87.patch)
+cross env <name>             ROSETTA_X87_PATH=...
+```
+`set x87 sidecar` on a runtime without the patch prints the same "no effect" reason.
+
+### App
+A **Fast x87 (32-bit)** toggle in the Performance box's second row (after CPU cores), saved
+through `AppModel.setPerformance`. It is disabled (while off) when the bottle's runtime cannot
+use it, with a tooltip that says a newer runtime from the DMG is needed. Tooltips
+`HelpText.perfX87` / `perfX87Unavailable` ("Hover help", performance box).
+
+### Verified (2026-11-06, M4 Max, macOS 27.2 (26B123), runtimes/winecx-full-x87 through a test CROSS_ROOT whose runtimes/winecx-full points at it, scratch bottle `x87test`)
+- `x87sidecar --probe`: `supported` (translate_insn, decode_opcode, opcode table 668 names,
+  fragment tree root found).
+- `src/x87bench` (the same float loop, 50 M iterations = 250 M float ops, i686 mingw, `-O2`):
+
+  | build | x87 off (Rosetta) | x87 sidecar |
+  |---|---|---|
+  | `x87bench387.exe` (`-mfpmath=387`) | 4.816 s | 0.562 s (8.6x faster) |
+  | `x87benchsse.exe` (`-msse2 -mfpmath=sse`) | 0.072 s | 0.072 s |
+
+  Same checksum (2.557494e+10) in all runs. Launch paths: `cross run` (first process; log line
+  `err:module:x87_sidecar_exec ROSETTA_X87_PATH: attaching x87sidecar --cooperative ...` with
+  WINEDEBUG=err+all) 0.558 s; `cross cmd x87test /c C:\x87bench\x87bench387.exe` (an i386 child
+  of the 64-bit cmd.exe) 0.560 s; `X87_FORCE_UNSUPPORTED=1` (the sidecar's "unknown Rosetta"
+  path): the banner `WARNING: X87SIDECAR COULD NOT HOOK ROSETTA ... RUNNING WITHOUT X87
+  ACCELERATION`, the program runs once at stock speed (4.817 s), no exec loop.
+- The same bottle on the live, unpatched `runtimes/winecx-full` with `x87 sidecar`: `bottle show`
+  says "no effect", `cross env` has no `ROSETTA_X87_PATH`, and even a hand-set one is ignored
+  by that ntdll (4.797 s).
+- The x87 runtime with `x87 off` creates a prefix and runs everything as before (bottle create,
+  wineboot, the SSE/x87 runs above at stock speed).
+- `runtimes/winecx-x87` (the plain runtime with the patch, 2 min 38 s of make), scratch bottle
+  `x87plain`: `x87bench387.exe` 4.640 s with `x87 off`, 0.545 s with `x87 sidecar`.
+
+### Ori and the Blind Forest DE (2026-11-06, Mac Studio M4 Max, macOS 27.2)
+Setup: the user's `Steam` bottle in Application Support (its own settings, `cpus 3`, DXMT for the
+32-bit D3D11), launched directly with `MTL_HUD_ENABLED=1 MTL_HUD_LOG_ENABLED=1 cross run Steam
+.../oriDE.exe` through a test CROSS_ROOT whose `runtimes/winecx-full` is `winecx-full-x87`, so
+every run used the patched runtime and only `ROSETTA_X87_PATH` (from the caller) differed; the
+bottle's cross.json and `.runtime` were not changed (the patched runtime's wine.inf got the
+installed app's mtime so the prefix was not updated). Steam (the installed 0.11 app's) kept
+running. One scripted sequence per run: title screen 30 s, Return (loads the user's save
+straight into gameplay), 45 s with Ori standing, a 10 s `sample`, Esc, two passes of
+Down×3/Up×3 in the pause menu, with the game frontmost (activated by pid) and nothing typed
+on the Mac during the windows except where noted. Present intervals from the Metal HUD log:
+
+| Run | x87 | Gameplay 45 s: fps | > 20 ms | > 50 ms | > 100 ms | worst |
+|---|---|---|---|---|---|---|
+| A | Rosetta | 56.3 | 2.9% | 33 | 6 | 333 ms |
+| A2 | Rosetta | 46.9 | 7.4% | 58 | 27 | 550 ms |
+| B | x87sidecar | 59.7 | 0.5% | 0 | 0 | 33 ms |
+| B2 | x87sidecar | 59.8 | 0.3% | 0 | 0 | 33 ms |
+
+A2's window has HUD lines for only 25 of its 45 s (a message from the user reached Claude
+during it, most likely typed on this Mac, and Unity stops rendering while it is not the key
+window), so A is the clean stock baseline; A2's frames that were drawn still show the stalls. Pause-menu hovers (6 key presses
+per pass): A 3 then 14 frames above 100 ms (worst 150 and 283 ms); A2 pass 2 one (117 ms),
+pass 1 unusable (focus); B2 none above 50 ms (worst 50 and 33 ms), **but** in B2 the menu showed
+controller button prompts and the highlight was in the same place before and after, so it is
+not proven that those keys moved it; in B the Esc came while the save's "Ability Point" message
+was up and opened no menu. The idle title screen was smooth in both (A 59.8 fps, 0.4% > 20 ms;
+B 59.3 fps, 1.2%, worst 50 ms).
+
+`sample` during the gameplay window, share of each thread's non-waiting samples in "Rosetta
+Runtime Routines" (where the x87 emulation lives; with the sidecar Rosetta's AOT cache is off,
+so the remaining code shows as "Rosetta JIT" instead of unnamed AOT code): main game thread
+A 15.3%, A2 14.9% -> B 6.0%, B2 3.7%; the busy-waiting Unity worker A 18.8%, A2 16.9% -> B 0.0%,
+B2 0.0%. Time to the first frames: 31-34 s stock, 33 and 44 s with the sidecar. The sidecar
+logged only informational lines (`x87 cache: block ... translated again, resetting cache`, 12 per
+run), no error and no fallback banner.
+
+The user, watching without being told which run was which, wrote during B "I don't know what you
+did but the game suddenly runs smoothly" and during A2 "the game stutters again".
+
+Side effect: Ori autosaved once during B2 (`saveFile0.sav` at 17:03:15, Ori standing where the
+user had left it); the user's own backups (`saveFile0_bkup0/1.sav`, 16:37) were untouched.
+
+Not measured: the M1 MacBook (expected to gain at least as much, untested), audio crackle,
+longer play, other 32-bit games, the pause-menu hover stall with the sidecar beyond doubt (see
+B2 above), `X87_PRECISE_FAULTS`. Default stays `off`: one game on one Mac is not enough to turn
+it on for every 32-bit program (precision, the abort-on-fault behaviour, and Rosetta's AOT cache
+off in those processes); the recommendation is to turn it on for Ori and other 32-bit Unity games.

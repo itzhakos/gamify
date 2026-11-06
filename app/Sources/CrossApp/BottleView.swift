@@ -567,6 +567,12 @@ struct PerformanceBox: View {
         return counts.sorted(by: >)
     }
 
+    /// Fast x87 (32-bit): x87sidecar on or off.
+    private var x87: Binding<Bool> {
+        Binding(get: { bottle.config.performance.x87 == .sidecar },
+                set: { setting(\.x87).wrappedValue = $0 ? .sidecar : .off })
+    }
+
     /// Ray tracing: 0 = D3DMetal's default, 1 = on, 2 = off.
     private var raytracing: Binding<Int> {
         Binding(get: { bottle.config.performance.raytracing.map { $0 ? 1 : 2 } ?? 0 },
@@ -617,6 +623,10 @@ struct PerformanceBox: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .help(HelpText.perfCPUs)
+                    let x87Problem = model.x87SidecarProblem(for: bottle)
+                    Toggle("Fast x87 (32-bit)", isOn: x87)
+                        .disabled(x87Problem != nil && !x87.wrappedValue)
+                        .help(x87Problem == nil ? HelpText.perfX87 : HelpText.perfX87Unavailable)
                     Toggle("Metal HUD", isOn: setting(\.hud))
                         .help(HelpText.perfHUD)
                     Toggle("Retina (High Resolution)", isOn: setting(\.retina))

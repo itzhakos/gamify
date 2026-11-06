@@ -812,7 +812,7 @@ extension Bottle {
                      "  location    \(location?.path ?? prefix.path)",
                      "  debugging   \(config.debug ? "on (WINEDEBUG=\(Debug.wineDebug), " + Debug.environment.keys.sorted().map { "\($0)=\(Debug.environment[$0]!)" }.joined(separator: " ") + ")" : "off")",
                      "performance (applies to programs started afterwards):"]
-        lines += Bottle.performanceLines(config)
+        lines += Bottle.performanceLines(config, runtime: Runtime(project: project, name: config.runtime))
         return lines
     }
 
@@ -842,12 +842,14 @@ extension Bottle {
                      "DirectX 9 programs, 32- and 64-bit: \(got.dx9.title)\(why(c.graphics9.graphics, got.dx9)) (D3DMetal has no DirectX 9)")]
     }
 
-    /// Each performance setting with what it does in this bottle.
-    public static func performanceLines(_ config: BottleConfig) -> [String] {
+    /// Each performance setting with what it does in this bottle. `runtime` (the bottle's)
+    /// says whether `x87 = sidecar` can work there.
+    public static func performanceLines(_ config: BottleConfig, runtime: Runtime? = nil) -> [String] {
         func onOff(_ b: Bool) -> String { b ? "on" : "off" }
         let p = config.performance
         let d3dmetal = config.graphics == .d3dmetal
-        let env = p.environment(graphics: config.graphics)
+        let sidecar = p.x87 == .sidecar ? runtime?.x87Sidecar : nil
+        let env = p.environment(graphics: config.graphics, x87Sidecar: sidecar)
         func vars(_ keys: [String]) -> String {
             let set = keys.compactMap { k in env[k].flatMap { $0 }.map { "\(k)=\($0)" } }
             return set.isEmpty ? "" : set.joined(separator: " ")
@@ -858,6 +860,7 @@ extension Bottle {
             ("metalfx", onOff(p.metalfx), d3dmetal ? (p.metalfx ? vars(["D3DM_ENABLE_METALFX"]) + ", nvngx.dll + nvapi64.dll in system32, NGXCore\\FullPath" : "") : onlyD3DMetal),
             ("avx", onOff(p.avx), vars(["ROSETTA_ADVERTISE_AVX"])),
             ("cpus", p.cpus.map(String.init) ?? "all", cpusText(p.cpus)),
+            ("x87", p.x87.rawValue, x87Text(p.x87, sidecar: sidecar, runtime: runtime)),
             ("raytracing", p.raytracing.map(onOff) ?? "default", d3dmetal ? vars(["D3DM_SUPPORT_DXR"]) : onlyD3DMetal),
             ("maxfps", p.maxFPS.map(String.init) ?? "off", d3dmetal ? vars(["D3DM_MAX_FPS"]) : onlyD3DMetal),
             ("hud", onOff(p.hud), config.debug && !p.hud ? "MTL_HUD_ENABLED=1 while debugging mode is on" : vars(["MTL_HUD_ENABLED"])),
@@ -866,6 +869,17 @@ extension Bottle {
         lines.append(("vendor", p.vendorID.map(PerformanceSettings.hex) ?? "default",
                       d3dmetal ? (vars(["D3DM_VENDOR_ID"]).isEmpty ? "D3DMetal's own (0x1002)" : vars(["D3DM_VENDOR_ID"])) : onlyD3DMetal))
         return lines.map { "  " + $0.0.padding(toLength: 12, withPad: " ", startingAt: 0) + $0.1.padding(toLength: 13, withPad: " ", startingAt: 0) + $0.2 }
+    }
+
+    /// The `x87` line's text: what 32-bit programs run their x87 math on in this bottle.
+    static func x87Text(_ mode: X87Mode, sidecar: URL?, runtime: Runtime?) -> String {
+        switch mode {
+        case .off:
+            return "32-bit programs: x87 math emulated by Rosetta (sidecar = x87sidecar, ROSETTA_X87_PATH)"
+        case .sidecar:
+            if let sidecar { return "ROSETTA_X87_PATH=\(sidecar.path): 32-bit programs start under x87sidecar" }
+            return "no effect: " + (runtime?.x87SidecarProblem ?? "the runtime was not checked")
+        }
     }
 
     /// The `cpus` line's text: what programs see, against this Mac's core count.

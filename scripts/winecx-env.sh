@@ -98,6 +98,11 @@ export MTL_HUD_ENABLED="${MTL_HUD_ENABLED:-0}"
 # Processors programs see (CW HACK 24711 in ntdll; per bottle cross.json performance.cpus,
 # `cross bottle set <b> cpus <n>|all`): passed on when set, unset = all of the Mac's.
 if [ -n "${WINENCPU:-}" ]; then export WINENCPU; else unset WINENCPU; fi
+# x87 math of 32-bit programs (per bottle cross.json performance.x87, `cross bottle set <b> x87
+# sidecar|off`): a runtime built with src/patches/loader-rosetta-x87.patch starts every i386
+# process under `$ROSETTA_X87_PATH --cooperative` (runtimes/x87sidecar/x87sidecar, built by
+# scripts/build-x87sidecar.sh); other runtimes ignore it. Passed on when set, unset = Rosetta's own.
+if [ -n "${ROSETTA_X87_PATH:-}" ]; then export ROSETTA_X87_PATH; else unset ROSETTA_X87_PATH; fi
 export PATH="$WINECX_HOME/bin:$PATH"
 # winecx-full only: GStreamer's plugin dir and scanner are compiled in as absolute
 # paths; set them explicitly so the runtime keeps working if the tree is moved.

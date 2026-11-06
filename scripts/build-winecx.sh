@@ -7,7 +7,9 @@
 #   scripts/build-winecx.sh configure  re-run configure only
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/upstream/crossover-sources-25.1.0/sources/wine"
+# WINECX_SRC builds from another copy of the tree (e.g. an APFS clone made with `cp -Rc` to try a new
+# src/patches/*.patch without touching the shared tree that the live runtimes were built from).
+SRC="${WINECX_SRC:-$ROOT/upstream/crossover-sources-25.1.0/sources/wine}"
 # WINECX_PREFIX / WINECX_BUILD build a second copy next to the live one (e.g.
 # runtimes/winecx-sse + build/x86_64-sse), so a running bottle is never touched.
 # The prefix must already hold the deps: clone the live runtime with `cp -Rc` first.
