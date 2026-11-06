@@ -61,14 +61,8 @@ DISTVERSION="$SRC/programs/winedbg/distversion.h"
 EOH
 
 # Our own fixes on top of CodeWeavers' tree: src/patches/*.patch (e.g. winemac-qt5-opengl.patch,
-# docs/worms-opengl.md). The .diff there is only the CrossOver-vs-Wine-10.0 reference, never applied.
-# Idempotent: a patch that already reverses cleanly is in the tree and is skipped.
-for p in "$ROOT"/src/patches/*.patch; do
-  [ -e "$p" ] || continue
-  patch -p1 -R --dry-run -s -f -d "$SRC" < "$p" > /dev/null 2>&1 && continue
-  echo "=== applying $(basename "$p")"
-  patch -p1 -s -f -d "$SRC" < "$p"
-done
+# docs/worms-opengl.md), the ones the tree does not hold yet (scripts/apply-patches.sh).
+"$ROOT/scripts/apply-patches.sh" "$SRC"
 
 if [ "${1:-}" = configure ] || [ ! -f Makefile ]; then
   echo "=== $(date '+%H:%M:%S') configure"

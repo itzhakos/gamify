@@ -425,7 +425,13 @@ CrossOver 26.1: rebuild and swap".
 
 Since 2026-11-06 also `loader-rosetta-x87.patch`, not a CodeWeavers hack: ported from
 athei/wine (cx-26-patched, f837e313f7), it starts 32-bit processes under x87sidecar when
-`ROSETTA_X87_PATH` is set (docs/app.md "x87 acceleration").
+`ROSETTA_X87_PATH` is set (docs/app.md "x87 acceleration"); and `ntdll-gamemode-bundle.patch`
+(ours), which runs every Wine process from a minimal per-program `.app` bundle so that macOS Game
+Mode can turn on (below and docs/app.md "Game Mode"). It changes lines that
+`loader-rosetta-x87.patch` added, so since then `scripts/apply-patches.sh` decides which patches a
+tree already holds by reversing them newest first on a scratch copy of the files they touch (the
+build scripts' old check, "the patch reverses cleanly on its own", fails for the earlier of two
+stacked patches and then half-applied it again).
 
 ### win32u-d3dkmt-hwsched.patch (HAGS, CW HACK 24905)
 
@@ -480,5 +486,43 @@ athei/wine (cx-26-patched, f837e313f7), it starts 32-bit processes under x87side
 - **Result: no effect as built.** LaunchServices ignores the loader's embedded plist altogether:
   every Wine process (old and new runtime) is registered as `"wine"` with no bundle id, not as
   "CrossOver-Hosted Application" / UIElement, and gamepolicyd logs `Ignoring` for it. Game Mode
-  most likely needs the loader in a real `.app` bundle (`Contents/Info.plist` with these keys);
-  not tried. Evidence in docs/runtime-full.md "Ported from CrossOver 26.1: rebuild and swap".
+  needs the loader in a real `.app` bundle (`Contents/Info.plist` with these keys): done by
+  `ntdll-gamemode-bundle.patch` (2026-11-06, next section). Evidence in docs/runtime-full.md
+  "Ported from CrossOver 26.1: rebuild and swap". CrossOver 25.1's own loader plist has none of
+  the Game Mode keys.
+
+### ntdll-gamemode-bundle.patch (Game Mode, 2026-11-06)
+
+- What macOS needs, found with a hand-made bundle around a copy of the loader (probe runs in a
+  scratch bottle, `d3d11test32.exe` full screen on DXMT, whose Metal HUD has a Game Mode line):
+  gamepolicyd labels a process a game only from its bundle's `Info.plist` (log: `Found game
+  GameProcess("Probe", ..., labelReason=LSSupportsGameMode (Info.plist))`), and turns Game Mode on
+  when that app is frontmost **and** full screen (`Game mode enabled.`, HUD "Game Mode On",
+  presentation "Direct"). Wine's full-screen window, a borderless screen-sized window above the
+  menu bar, counts: no native full-screen Space is needed. Frontmost but windowed: `Game mode
+  disabled.` The bundle's executable may be a copy or a **hard link** of the ad hoc signed loader,
+  even though that signature binds the loader's own embedded plist; a **symlink** does not work
+  (gamepolicyd follows it to the loader outside the bundle and logs `Ignoring`). `LSUIElement = 1`
+  is fine (winemac makes the app Foreground when it shows a window).
+- The patch, in `dlls/ntdll/unix/loader.c`: CW HACK 22144 already execs every child process
+  through a hard link to the loader named after the program,
+  `$TMPDIR/winetemp-<loader inode-size-mtime>/<exe>` (the Dock name). `create_preloader_bundle`
+  puts that link into `<exe>.app/Contents/MacOS/<exe>` in the same folder and writes
+  `Contents/Info.plist` (the loader's plist with `CFBundleExecutable` and `CFBundleName` = the
+  exe's file name, bundle id `local.gamify.wine.<exe>` with other characters as `-`, plus the
+  three Game Mode keys; rewritten through a temporary file and `rename` only when different). A
+  hard link, or a copy where linking fails (another volume); the flat link stays the fallback if
+  the bundle cannot be made. The first process of a launch (`cross run`, `cross steam`: no
+  `WINESERVERSOCKET`) runs as `bin/wine` outside any bundle, so `bundle_first_process` re-execs it
+  through the same bundle (only with `WINEDLLPATH` set, which the link needs to find
+  `ntdll.so`, as CW HACK 22144 requires; not when it already runs from a bundle, and not when
+  x87sidecar started it, since another exec would drop the hook). An i386 first process goes
+  through x87sidecar with the bundled link as its loader (`x87_sidecar_first_process` gained the
+  loader as an argument).
+- Every Wine process that checks in with LaunchServices (those that start the Mac driver: windows,
+  clipboard) is therefore a game to macOS, launchers like Steam included; only a frontmost
+  full-screen one turns Game Mode on. LaunchServices registers each `<exe>.app` the first time it
+  runs (bundle path under `$TMPDIR`, like CrossOver's links).
+- Verified with the built runtime (scratch bottle: first process 32 and 64 bit, `x87 sidecar`, a
+  child through `start`; Ori in the Steam bottle: HUD "Game Mode On"); no change in Ori's late
+  frames on the Mac Studio. docs/app.md "Game Mode".

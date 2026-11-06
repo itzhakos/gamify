@@ -1856,3 +1856,71 @@ longer play, other 32-bit games, the pause-menu hover stall with the sidecar bey
 B2 above), `X87_PRECISE_FAULTS`. Default stays `off`: one game on one Mac is not enough to turn
 it on for every 32-bit program (precision, the abort-on-fault behaviour, and Rosetta's AOT cache
 off in those processes); the recommendation is to turn it on for Ori and other 32-bit Unity games.
+
+## Game Mode (2026-11-06)
+Why: macOS Game Mode gives the frontmost full-screen game first claim on the CPU and GPU, lowers
+background work and doubles the Bluetooth polling rate of controllers and AirPods. It never turned on
+for a game in Gamify: macOS decides "this is a game" only from an app bundle's `Info.plist`
+(`LSSupportsGameMode`, `GCSupportsGameMode` or a games `LSApplicationCategoryType`), and every Wine
+process ran as a bare loader (`lsappinfo`: bundle id NULL), whose embedded plist LaunchServices never
+reads (`loader-plist-gamemode.patch` put the keys there without effect). The Metal HUD said "Game
+Mode Off" for Ori even full screen.
+
+### What macOS needs (probes, scratch bottle, `d3d11test32.exe` full screen on DXMT)
+- A bundle, `X.app/Contents/{Info.plist, MacOS/X}`, with the keys: gamepolicyd logs `Found game
+  GameProcess("X", ..., labelReason=LSSupportsGameMode (Info.plist))` when the process checks in.
+- The app frontmost **and** full screen. Wine's full-screen window (a borderless screen-sized
+  window above the menu bar) counts; no native full-screen Space is needed. Frontmost and
+  windowed: `Game mode disabled.`
+- The bundle's executable may be a copy or a hard link of the loader (ad hoc signed, its signature
+  bound to the loader's own plist: no effect on launch or Game Mode). A symlink does not work
+  (gamepolicyd follows it to the loader outside the bundle: `Ignoring`).
+
+### How (`src/patches/ntdll-gamemode-bundle.patch`, ntdll unix side)
+CrossOver already runs every child process from a hard link to the loader named after the program
+(`$TMPDIR/winetemp-<loader id>/<exe>`, CW HACK 22144, the Dock name). That link now lives in a
+minimal bundle, `$TMPDIR/winetemp-<loader id>/<exe>.app/Contents/MacOS/<exe>`, next to an
+`Info.plist` with the loader's keys (name = the exe's file name, as before; bundle id
+`local.gamify.wine.<exe>`) and the three Game Mode keys; a copy where a hard link fails (runtime
+on another volume), the flat link if the bundle cannot be made. The first process of a launch
+(`cross run <bottle> game.exe`, `cross steam`) re-execs itself through the same bundle; a 32-bit
+one goes through x87sidecar with the bundled path as its loader, so `x87 sidecar` keeps working.
+No CrossCore, app or packaging change: the runtime's `ntdll.so` changes, so the release that
+carries it is a full DMG update (runtime-version changes). Details: docs/codeweavers-patches.md
+"ntdll-gamemode-bundle.patch".
+
+Every Wine process that opens the Mac driver (windows, clipboard) is therefore a game to macOS,
+Steam included; only a frontmost full-screen one turns Game Mode on, and the user can switch it
+off per game from the Game Mode item in the menu bar. LaunchServices registers each `<exe>.app` the
+first time it runs.
+
+### Verified (2026-11-06, Mac Studio M4 Max, runtime built in a worktree)
+- Scratch bottle, every launch path, gamepolicyd `Game mode status is now on` while frontmost and
+  full screen, `lsappinfo` bundle id `local.gamify.wine.<exe>`: 32-bit first process
+  (`cross run`, DXMT); the same with `x87 sidecar` (sidecar attached to
+  `.../d3d11test32.exe.app/Contents/MacOS/d3d11test32.exe`); a 32-bit child with the sidecar
+  (`cross cmd <bottle> /c start /wait /unix ...`; a child's process title is its Windows path, so
+  find it by `ps` comm, not `pgrep -x`); 64-bit on D3DMetal. x87bench still 0.54 s with the
+  sidecar vs 4.51 s without. A trivial first process starts in 0.51 s vs 0.50 s (the extra exec
+  costs nothing measurable).
+- Ori (Steam bottle, `x87 sidecar`, `cpus 3`, full screen 3440x1440, launched with `cross run`
+  while Steam ran): Metal HUD "Game Mode On" at the save slots and in gameplay; gamepolicyd kept it
+  on through every measurement window (one 20 ms pause). The installed 0.13 runtime on the same
+  spot: "Game Mode Off".
+
+### What it changes for Ori (Mac Studio)
+Late frames (present interval > 33 ms) per ~35 s gameplay window (20 s standing, then 10 s of
+running left and right), three alternating launches per arm, two windows each:
+
+| | > 33 ms per window | > 50 ms total | worst | fps | game CPU |
+|---|---|---|---|---|---|
+| Game Mode on (this runtime) | 7, 2, 6, 0, 4, 2 (21) | 8 | 59 ms | 60.2-60.4 | 68-70% |
+| Game Mode off (0.13) | 6, 0, 6, 1, 4, 4 (21) | 5 | 57 ms | 60.1-60.4 | 69-72% |
+
+No difference on the Studio: full screen with the sidecar already leaves Ori at about 3-4 late
+frames per window, nearly all while running into new ground, and the Studio has plenty of spare CPU
+and GPU (GPU 2.8 ms a frame). One visible effect: with Game Mode on, helper programs started in the
+background during gameplay (`wclick.exe`, which sends the keys) took about 1.2 s to start instead of
+about 0.8 s, consistent with Game Mode putting background work behind the game. Where Game Mode
+should matter more: the M1 MacBook (less headroom, background apps competing) and Bluetooth
+controllers (doubled polling rate; not tested, the DualShock 4 was not connected).

@@ -2,6 +2,25 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **Game Mode now turns on for Wine games (frontmost + full screen); no change in Ori's late frames
+  on the Studio** (2026-11-06 night, side session, branch `claude/reverent-chatelet-ce4078`, not
+  released): macOS labels a game only from a bundle's Info.plist (probes with a hand-made bundle:
+  gamepolicyd `Found game ... labelReason=LSSupportsGameMode (Info.plist)`), so the keys in the
+  loader's embedded plist never counted. Wine's borderless full-screen window does count as full
+  screen; the bundle executable may be a hard link or copy of the loader, not a symlink.
+  `src/patches/ntdll-gamemode-bundle.patch` turns CW HACK 22144's per-program loader link into a
+  minimal bundle, `$TMPDIR/winetemp-<id>/<exe>.app` (bundle id `local.gamify.wine.<exe>`, games
+  category, `LSSupportsGameMode`, `GCSupportsGameMode`), and re-execs the first process of a launch
+  through it; a 32-bit first process goes through x87sidecar with the bundled loader. New
+  `scripts/apply-patches.sh` (both build scripts): the patch rewrites lines of
+  loader-rosetta-x87.patch, which broke the old "reverse dry-run = applied" check (it half-applied
+  the x87 patch); applied patches are now found by reversing newest first on a scratch copy.
+  Verified: scratch bottle (32/64-bit, sidecar, child via `start`), Ori HUD "Game Mode On". Ori A/B
+  (Steam bottle, `x87 sidecar`, `cpus 3`, full screen; 3 launches per arm, 2 windows each): > 33 ms
+  frames 21 in 6 windows on and 21 off, CPU 68-70% vs 69-72%; background helpers started during
+  gameplay took ~1.2 s vs ~0.8 s (Game Mode deprioritising background work). Untested: M1 MacBook,
+  Bluetooth controller (DS4 not connected). Release = full DMG (ntdll.so changes). docs/app.md
+  "Game Mode".
 - **Ori: full screen removes most of the remaining hitches; Game Mode cannot engage; Steam Input was
   forced on** (2026-11-06 evening, main session, Mac Studio): the user still saw judder at a "59-60 fps"
   average. The HUD log shows why: 1-5% of frames miss a refresh (33-47 ms), in bursts every 1-2 s,
@@ -10,11 +29,11 @@ What is live, in one place; everything below it is the chronological log (dead e
   1440`; Unity then saves it under HKCU\Software\Microsoft Studios\Ori And The Blind Forest: Definitive
   Edition, "Screenmanager ..." values, so Steam launches keep it) cuts late frames per ~35 s gameplay
   window from 59-73 (windowed, sidecar) to 6-9 (full screen, sidecar) and 12 (full screen, stock, with
-  one 157 ms spike); best = full screen + sidecar; GPU at native 3440x1440 3.7 ms. **Game Mode stays
+  one 157 ms spike); best = full screen + sidecar; GPU at native 3440x1440 3.7 ms. **Game Mode stayed
   Off** even full screen: the game process has no app bundle (`lsappinfo`: bundleID NULL), so the game
-  category that loader-plist-gamemode.patch embeds in wineloader's `__info_plist` is never read, and
-  Wine's full-screen window is a borderless layer-27 window, not a native full-screen space; Game Mode
-  would need Wine launched from an .app bundle (follow-up). **Controller:** Ori's per-game Steam Input
+  category that loader-plist-gamemode.patch embeds in wineloader's `__info_plist` is never read
+  (fixed by ntdll-gamemode-bundle.patch, bullet above; the borderless full-screen window turned out
+  to count as full screen). **Controller:** Ori's per-game Steam Input
   was forced on (`localconfig.vdf` apps/387290 `UseSteamControllerConfig` "2"; Split Fiction 2001120
   too) while Wine's winebus also exposes the DualShock 4 to the game (Enum `WINEBUS\VID_054C&PID_09CC`,
   BT 1C:A0:B8:E9:F2:3E), so the pad could reach Ori twice; set to "0" with Steam stopped (backup in the

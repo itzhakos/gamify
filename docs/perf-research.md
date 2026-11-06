@@ -30,7 +30,8 @@ Stages 1 and 2 of the plan below are merged into `main` and live:
   xcr0 = 0x7 even with `ROSETTA_ADVERTISE_AVX=1`, and a 256-bit AVX add still works), so
   the XGETBV patch only matters on older macOS; and the Game Mode plist keys are ignored
   because macOS registers Wine processes as "wine" without a bundle id (Game Mode daemon
-  logs "Ignoring"), so Game Mode needs the loader inside a real .app bundle (not done).
+  logs "Ignoring"), so Game Mode needs the loader inside a real .app bundle (done 2026-11-06:
+  `ntdll-gamemode-bundle.patch`, section 7).
 - DXVK 1.10.3 and DXMT 0.80 are built (`scripts/build-dxvk.sh`, `scripts/build-dxmt.sh`) and
   selectable as `graphics` dxvk / dxmt per bottle (docs/dxmt-dxvk.md, docs/app.md "Graphics
   backends"). Battle.net's 32-bit CEF now gets a GPU path on DXVK, but its login page still
@@ -257,6 +258,14 @@ Info.plist: `GCSupportsGameMode = true` (macOS 14+), `LSSupportsGameMode = true`
 macOS honours them for a Wine process is unverified (an Apple forum thread reports Game
 Mode not activating for a launcher's child process). Cheap experiment: add the keys, run a
 full-screen game, look for the Game Mode icon in the menu bar.
+
+**Done (2026-11-06):** the keys in the loader's embedded plist did nothing (LaunchServices never
+reads it); `src/patches/ntdll-gamemode-bundle.patch` runs every Wine process from a minimal
+per-program `.app` bundle with them, and Game Mode turns on for a frontmost full-screen game
+(Wine's borderless full-screen window counts). Measured on Ori on the Mac Studio (full screen,
+sidecar): the same 3-4 late frames per window with and without it; still to see on the M1 MacBook
+and with a Bluetooth controller. docs/app.md "Game Mode", docs/codeweavers-patches.md
+"ntdll-gamemode-bundle.patch".
 
 ## 8. D3DMetal 4.0 beta (GPTK 4)
 

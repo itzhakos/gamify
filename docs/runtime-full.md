@@ -124,12 +124,16 @@ alone ate a core in Portal 2 (docs/portal2-audio.md). x86_64 is SSE by ABI and s
 without the mingw CRT, and its i386 flags already include `-mpreferred-stack-boundary=2`, so gcc
 realigns the stack itself where SSE needs 16 bytes.
 
-The scripts also apply `src/patches/*.patch` to the CrossOver tree before configure (idempotent:
-a patch that already reverses cleanly is skipped), so our own fixes, currently
+The scripts also apply `src/patches/*.patch` to the CrossOver tree before configure
+(`scripts/apply-patches.sh` since 2026-11-06; idempotent: which patches the tree already holds
+is decided by reversing them newest first on a scratch copy of the files they touch, because a
+later patch may change lines of an earlier one, and a patch that does not apply stops the
+build instead of being half-applied), so our own fixes, currently
 `winemac-qt5-opengl.patch` (docs/worms-opengl.md), since 2026-10-22 the three CrossOver 26.1
 ports (section "Ported from CrossOver 26.1" below) and since 2026-11-06
-`loader-rosetta-x87.patch` (x87sidecar for 32-bit processes, docs/app.md "x87 acceleration"),
-are part of every build.
+`loader-rosetta-x87.patch` (x87sidecar for 32-bit processes, docs/app.md "x87 acceleration")
+and `ntdll-gamemode-bundle.patch` (programs run from a per-program `.app` bundle, so macOS Game
+Mode can turn on, docs/app.md "Game Mode"), are part of every build.
 `src/patches/crossover-25.1.0-over-wine-10.0.diff` is reference only and never applied.
 `WINECX_PREFIX` / `WINECX_BUILD` build a second copy next to the live runtime; the prefix must
 already hold the deps (clone the live runtime with `cp -Rc`; the deps' install names then

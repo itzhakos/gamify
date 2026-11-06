@@ -1,0 +1,263 @@
+ntdll-gamemode-bundle.patch - Gamify patch over CrossOver 25.1.0 Wine (dlls/ntdll/unix), LGPL-2.1-or-later.
+macOS Game Mode for Wine programs. macOS turns Game Mode on only for a frontmost, full-screen app
+that LaunchServices knows as a game from its bundle's Info.plist; it never reads the Info.plist
+linked into the loader (loader-plist-gamemode.patch), so a bare loader never qualified. CW HACK
+22144 already runs every child process from a hard link to the loader named after the program,
+$TMPDIR/winetemp-<loader id>/<exe>; that link now goes into a minimal bundle,
+$TMPDIR/winetemp-<loader id>/<exe>.app/Contents/{Info.plist, MacOS/<exe>} (the loader's plist,
+bundle id local.gamify.wine.<exe>, game category, GCSupportsGameMode, LSSupportsGameMode), a hard
+link or, across volumes, a copy (a symlink does not work: gamepolicyd follows it and ignores the
+process); the flat link stays the fallback. The first process of a launch (no WINESERVERSOCKET,
+WINEDLLPATH set) re-execs itself through the same bundle, and an i386 first process goes through
+the x87sidecar with the bundled link as its loader (applies on top of loader-rosetta-x87.patch).
+Wine's borderless full-screen window counts as full screen; windowed programs stay out of Game Mode.
+Details: docs/app.md "Game Mode", NOTES 2026-11-06.
+
+--- a/dlls/ntdll/unix/loader.c	2026-11-06 17:49:54
++++ b/dlls/ntdll/unix/loader.c	2026-11-06 21:06:47
+@@ -73,6 +73,8 @@
+ # include <libkern/OSCacheControl.h>
+ # include "coop_proto.h"
+ # include <crt_externs.h>
++# include <copyfile.h>
++# include <mach-o/dyld.h>
+ # ifndef _POSIX_SPAWN_DISABLE_ASLR
+ #  define _POSIX_SPAWN_DISABLE_ASLR 0x0100
+ # endif
+@@ -663,6 +665,151 @@
+ fail:
+     free(linkpath);
+     return NULL;
++}
++
++/* Gamify HACK (Game Mode): macOS turns Game Mode on only for a frontmost, full-screen app
++ * that LaunchServices knows as a game from its bundle's Info.plist. It never reads the
++ * Info.plist linked into the loader (__info_plist), so a bare loader or a link to it never
++ * qualifies. The link therefore goes into a minimal bundle,
++ * <tempdir>/<exe_name>.app/Contents/MacOS/<exe_name>, whose Info.plist is the loader's own
++ * (loader/wine_info.plist.in, same name as the flat link) plus the game keys. */
++static const char bundle_info_plist[] =
++    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
++    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
++    "<plist version=\"1.0\">\n"
++    "<dict>\n"
++    "    <key>CFBundleAllowMixedLocalizations</key>\n"
++    "    <true/>\n"
++    "    <key>CFBundleDevelopmentRegion</key>\n"
++    "    <string>English</string>\n"
++    "    <key>CFBundleExecutable</key>\n"
++    "    <string>%s</string>\n"
++    "    <key>CFBundleIdentifier</key>\n"
++    "    <string>local.gamify.wine.%s</string>\n"
++    "    <key>CFBundleInfoDictionaryVersion</key>\n"
++    "    <string>6.0</string>\n"
++    "    <key>CFBundleName</key>\n"
++    "    <string>%s</string>\n"
++    "    <key>CFBundlePackageType</key>\n"
++    "    <string>APPL</string>\n"
++    "    <key>CFBundleShortVersionString</key>\n"
++    "    <string>" PACKAGE_VERSION "</string>\n"
++    "    <key>CFBundleSignature</key>\n"
++    "    <string>?\?\?\?</string>\n"
++    "    <key>CFBundleVersion</key>\n"
++    "    <string>" PACKAGE_VERSION "</string>\n"
++    "    <key>NSPrincipalClass</key>\n"
++    "    <string>WineApplication</string>\n"
++    "    <key>LSUIElement</key>\n"
++    "    <string>1</string>\n"
++    "    <key>LSApplicationCategoryType</key>\n"
++    "    <string>public.app-category.games</string>\n"
++    "    <key>GCSupportsGameMode</key>\n"
++    "    <true/>\n"
++    "    <key>LSSupportsGameMode</key>\n"
++    "    <true/>\n"
++    "</dict>\n"
++    "</plist>\n";
++
++/* Escape &, < and > for a plist <string>. */
++static char *plist_escape(const char *str)
++{
++    const char *p;
++    char *ret, *q;
++    size_t len = 1;
++
++    for (p = str; *p; p++)
++        len += *p == '&' ? 5 : (*p == '<' || *p == '>') ? 4 : 1;
++    if (!(ret = malloc(len)))
++        return NULL;
++    for (p = str, q = ret; *p; p++)
++    {
++        if (*p == '&') q = stpcpy(q, "&amp;");
++        else if (*p == '<') q = stpcpy(q, "&lt;");
++        else if (*p == '>') q = stpcpy(q, "&gt;");
++        else *q++ = *p;
++    }
++    *q = 0;
++    return ret;
++}
++
++/* Write contents to path through a temporary file and rename(), unless path holds them already. */
++static BOOL write_bundle_file(const char *path, const char *contents)
++{
++    size_t len = strlen(contents);
++    char *buf, *tmp;
++    BOOL ret = FALSE;
++    int fd;
++
++    if ((fd = open(path, O_RDONLY)) != -1)
++    {
++        if ((buf = malloc(len + 1)))
++        {
++            ret = read(fd, buf, len + 1) == len && !memcmp(buf, contents, len);
++            free(buf);
++        }
++        close(fd);
++        if (ret) return TRUE;
++    }
++    if (asprintf(&tmp, "%s.%d", path, (int)getpid()) == -1)
++        return FALSE;
++    if ((fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644)) != -1)
++    {
++        ret = write(fd, contents, len) == len;
++        close(fd);
++        if (ret) ret = !rename(tmp, path);
++    }
++    if (!ret) unlink(tmp);
++    free(tmp);
++    return ret;
++}
++
++/* The bundled link to the loader: a hard link like the flat one, or a copy where that fails
++ * (e.g. the runtime on another volume). Not a symlink: gamepolicyd follows it to the loader
++ * outside the bundle and ignores the process. NULL on failure. */
++static char *create_preloader_bundle(const char *wineloader_path, const char *exe_name)
++{
++    char *dir = create_tempdir(wineloader_path), *name = NULL, *id = NULL, *plist = NULL;
++    char *app = NULL, *contents = NULL, *macos = NULL, *info = NULL, *exe = NULL, *tmp = NULL, *p;
++    char *ret = NULL;
++    struct stat st;
++
++    if (!dir || !(name = plist_escape(exe_name)) || !(id = strdup(exe_name)))
++        goto done;
++    for (p = id; *p; p++)  /* a bundle id is letters, digits, '.' and '-' */
++        if (!(*p >= 'a' && *p <= 'z') && !(*p >= 'A' && *p <= 'Z') && !(*p >= '0' && *p <= '9') && *p != '.')
++            *p = '-';
++    if (asprintf(&plist, bundle_info_plist, name, id, name) == -1 ||
++        asprintf(&app, "%s%s.app", dir, exe_name) == -1 ||
++        asprintf(&contents, "%s/Contents", app) == -1 ||
++        asprintf(&macos, "%s/MacOS", contents) == -1 ||
++        asprintf(&info, "%s/Info.plist", contents) == -1 ||
++        asprintf(&exe, "%s/%s", macos, exe_name) == -1)
++        goto done;
++
++    /* mkdir may fail if the directory already exists but that's ok */
++    mkdir(app, 0700);
++    mkdir(contents, 0700);
++    mkdir(macos, 0700);
++    if (!write_bundle_file(info, plist))
++        goto done;
++
++    /* If the executable already exists, use it (if it's in this dir, it is the right loader). */
++    if (!stat(exe, &st) || !link(wineloader_path, exe) || errno == EEXIST)
++        ret = exe;
++    else if (asprintf(&tmp, "%s.%d", exe, (int)getpid()) != -1)
++    {
++        if (!copyfile(wineloader_path, tmp, NULL, COPYFILE_DATA | COPYFILE_STAT) && !rename(tmp, exe))
++            ret = exe;
++        else
++            unlink(tmp);
++    }
++
++done:
++    if (ret != exe) free(exe);
++    free(dir); free(name); free(id); free(plist); free(app);
++    free(contents); free(macos); free(info); free(tmp);
++    return ret;
+ }
+ 
+ static void replace_wineloader_path_with_link(char **wineloader_path, const char *image_path)
+@@ -670,7 +817,8 @@
+     char *app_name = extract_exe_name(image_path);
+     if (app_name)
+     {
+-        char *preloader_path = create_preloader_link(*wineloader_path, app_name);
++        char *preloader_path = create_preloader_bundle(*wineloader_path, app_name);
++        if (!preloader_path) preloader_path = create_preloader_link(*wineloader_path, app_name);
+         if (preloader_path)
+         {
+             free(*wineloader_path);
+@@ -2724,9 +2872,10 @@
+  * the i386 children it starts are covered by preloader_exec().
+  * WINEX87SIDECARSTARTED marks the loader the sidecar started, hooked or not
+  * (an unsupported Rosetta makes the sidecar exec the loader without the hook),
+- * so that it does not go through the sidecar again.
++ * so that it does not go through the sidecar again. `loader` is the loader the
++ * sidecar starts (bin/wineloader, or the bundled link of bundle_first_process).
+  */
+-static void x87_sidecar_first_process( int argc, char *argv[] )
++static void x87_sidecar_first_process( int argc, char *argv[], const char *loader )
+ {
+     const char *sidecar;
+     char *path, **new_argv;
+@@ -2741,7 +2890,7 @@
+     if (get_pe_file_machine( path ) == IMAGE_FILE_MACHINE_I386 &&
+         (new_argv = malloc( (argc + 1) * sizeof(*new_argv) )))
+     {
+-        new_argv[0] = (char *)wineloader;  /* execv does not change it */
++        new_argv[0] = (char *)loader;  /* execv does not change it */
+         memcpy( new_argv + 1, argv + 1, argc * sizeof(*argv) );  /* argv[1..argc-1] + NULL */
+         setenv( "WINEX87SIDECARSTARTED", "1", 1 );
+         x87_sidecar_exec( sidecar, new_argv, path );
+@@ -2749,6 +2898,43 @@
+         free( new_argv );
+     }
+     free( path );
++}
++
++/***********************************************************************
++ *           bundle_first_process
++ *
++ * Gamify HACK (Game Mode): the first process of a launch is the loader itself
++ * (bin/wine), outside any bundle, and it runs the program named by its first
++ * argument in this same process. Re-exec it through the bundled link that
++ * preloader_exec() gives every other process (create_preloader_bundle), so that a
++ * program started directly can get Game Mode too; an i386 program goes through
++ * the x87sidecar with that link as its loader. Like the link, only with
++ * WINEDLLPATH set (the link finds ntdll.so through it). A process that already
++ * runs from a bundle (this re-exec) or that the sidecar started (another exec
++ * would drop its hook) runs as is.
++ */
++static void bundle_first_process( int argc, char *argv[] )
++{
++    char self[PATH_MAX], *app_name, *argv0 = argv[0], *bundle = NULL;
++    uint32_t size = sizeof(self);
++
++    if (argc >= 2 && !getenv( "WINESERVERSOCKET" ) && !getenv( "WINEX87SIDECARSTARTED" ) &&
++        getenv( "WINEDLLPATH" ) && (_NSGetExecutablePath( self, &size ) || !strstr( self, ".app/Contents/MacOS/" )) &&
++        (app_name = extract_exe_name( argv[1] )))
++    {
++        /* Pass the app name to the loader through an env var, as preloader_exec() does. */
++        if ((bundle = create_preloader_bundle( wineloader, app_name )))
++            setenv( "WINEPRELOADERAPPNAME", app_name, 1 );
++        free( app_name );
++    }
++    x87_sidecar_first_process( argc, argv, bundle ? bundle : wineloader );
++    if (!bundle) return;
++    argv[0] = bundle;
++    execv( bundle, argv );
++    ERR( "cannot exec %s: %s\n", bundle, strerror( errno ) );
++    argv[0] = argv0;
++    unsetenv( "WINEPRELOADERAPPNAME" );
++    free( bundle );
+ }
+ #endif
+ 
+@@ -2775,7 +2961,7 @@
+     {
+         check_command_line( argc, argv );
+ #ifdef __APPLE__
+-        x87_sidecar_first_process( argc, argv );
++        bundle_first_process( argc, argv );
+ #endif
+         if (pre_exec())
+         {
