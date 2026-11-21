@@ -3,11 +3,11 @@
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
 - **Wolfenstein II (Vulkan only) plays: three MoltenVK patches, a SPIRV-Cross patch, a winemac patch
-  and two keyboard settings; not released** (2026-11-21, main, uncommitted). Tested on the Studio in
-  the user's bottle `Steam` (Steam, the game's own saves) on the repo runtime, which now holds the
-  patched libMoltenVK.dylib + winemac.so (originals in the session scratchpad); Steam was left running
-  on it (`CROSS_ROOT=<repo>`, `WINENCPU=16`). Ship = rebuild winecx-full (both build scripts carry
-  the patches now) + release.
+  and two keyboard settings; released in 0.15** (2026-11-21, main, full DMG, runtime
+  `winecx-full-01330e8f6a0e`; docs/updates.md 0.15). Tested on the Studio in the user's bottle `Steam`
+  (Steam, the game's own saves), first on the repo runtime, then on the installed 0.15: the game
+  left open at the main menu, Steam running on the installed runtime with `WINENCPU=16` (the bottle
+  says 3).
   (1) **vkCreateDevice**: the user's 0.14 launch quit with `vkCreateDevice failed with error
   (VK_ERROR_FEATURE_NOT_PRESENT)`. MoltenVK's `[mvk-error]` named "the 39th flag in
   VkPhysicalDeviceFeatures" (counted from 1) = `shaderCullDistance`, which stock MoltenVK 1.4.2 does not

@@ -311,3 +311,23 @@ focus from the frontmost app, with 0.13's runtime as with 0.14's (macOS cooperat
 so Game Mode stays off until the game is frontmost (a click on its window); whether a game
 started with Play in Steam comes to the front by itself was not re-tested (activation is
 unchanged from 0.13).
+
+## 0.15 (2026-11-21): Wolfenstein II, keyboard settings, a full-DMG update
+
+The runtime changed in two files, so `runtime-version` changes and installed copies fetch the DMG:
+`lib/libMoltenVK.dylib` (scripts/moltenvk-patches: shaderCullDistance, undescribed vertex inputs,
+pipelineCacheUUID patch level, SPIRV-Cross gl_HelperInvocation) and
+`lib/wine/x86_64-unix/winemac.so` (src/patches/winemac-ascii-keyboard-layout.patch). The app adds
+the per-bottle settings `optionAlt` and `latinLayout` (both on; docs/app.md). Built like 0.14:
+`runtimes/winecx-full` rebuilt in place (`scripts/build-winecx-full.sh`; the patched MoltenVK went
+into `lib/` by the deps script's steps); smoke tests on the new runtime in a scratch bottle: DXVK
+(through the patched MoltenVK) D3D11 FL 11_0 64/32-bit and D3D9, D3DMetal D3D11 FL 11_0 and D3D9.
+
+Shipped: `runtime-version` `winecx-full-592c7446dc0c` -> `winecx-full-01330e8f6a0e`, DMG 576 MB.
+Right after the publish `releases/latest/download/latest.json` still served 0.14 (GitHub's cache).
+Installed on the Mac Studio with the helper's steps (DMG from the release, SHA-256, `ditto`,
+quarantine cleared, swap, ad hoc re-sign): the bottle page shows "Option key is Alt" and "English
+keyboard in games", checked. Steam started on the installed runtime refreshed the prefix once;
+Wolfenstein II launched from Steam with macOS on Hebrew: main menu "[R] PROGRESSION SLOT" (was
+"[*]"), 0 `[mvk-error]`, the installed runtime's libMoltenVK/winemac.so and Steam's
+GameOverlayRenderer64.dll in the game.
