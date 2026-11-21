@@ -950,6 +950,8 @@ CW HACK 24905, another session's work in src/patches).
 | `maxFPS` | absent | `D3DM_MAX_FPS=<n>`; on a DXMT backend also `DXMT_CONFIG=d3d11.preferredMaxFrameRate=<n>` | D3DMetal, and (since 2026-11-06) the 32-bit DXMT path: DXMT paces the cap through Metal/CoreAnimation (even frame times, ~1 frame of added latency), best with an even divisor of 60 (30/20/15), since an odd cap beats against vsync and runs slower than set (Ori: a cap of 40 fell to 27 fps). |
 | `hud` | off | `MTL_HUD_ENABLED=1` (off: `0`, as before) | Debugging mode sets `1` whatever this says (since 2026-11-06, "Debugging mode and log export"). |
 | `retina` | off | `HKCU\Software\Wine\Mac Driver\RetinaMode = Y` / `N` (REG_SZ) | winemac.drv reads it at process start for the whole prefix (macdrv_main.c:415, "consistent for all processes in the prefix"): change it with nothing running. An absent value counts as off, so default bottles get no write. |
+| `optionAlt` | on | `HKCU\Software\Wine\Mac Driver\LeftOptionIsAlt` + `RightOptionIsAlt = Y` / `N` | Since 2026-11-21. Wine's own default sends nothing for Option (`kVK_Option` has no vkey) and makes Command the Alt key; on: Option is Alt too (Wolfenstein II's lean is Left Alt). Read at process start, like RetinaMode. |
+| `latinLayout` | on | `HKCU\Software\Wine\Mac Driver\ASCIIKeyboardLayout = Y` / `N` (src/patches/winemac-ascii-keyboard-layout.patch) | Since 2026-11-21. While the selected macOS layout is not ASCII-capable (Hebrew, Russian, Arabic, Greek...), Windows programs get the ASCII-capable one next to it (ABC/U.S.) for key mapping, ToUnicode and the HKL; AZERTY/QWERTZ stay. Wolfenstein II on Hebrew dropped its W/A/S/D/R bindings without it. Off: Hebrew etc. can be typed inside Windows programs. A runtime without the patch ignores the value. |
 | `vendorID` | absent | `D3DM_VENDOR_ID=0x....` | Advanced override; absent = 0x10DE while metalfx is on, D3DMetal's own (0x1002) otherwise. |
 
 Shader cache: D3DMetal keeps `$(getconf DARWIN_USER_CACHE_DIR)d3dm/<exe name>/` (e.g.
@@ -970,12 +972,14 @@ cross bottle set <name> raytracing on|off|default  (alias dxr)
 cross bottle set <name> maxfps <n>|off             (alias fps)
 cross bottle set <name> hud on|off
 cross bottle set <name> retina on|off
+cross bottle set <name> optionalt on|off           (since 2026-11-21)
+cross bottle set <name> latinlayout on|off         (since 2026-11-21)
 cross bottle set <name> vendor <hex>|default       (0x10DE, 10de or decimal)
 cross cache clear <bottle> [<exe name>]            without an exe: list the cache folders with sizes,
                                                    marking the bottle's programs; with one: delete it
 ```
 
-`set graphics|metalfx|retina` also runs `applyPerformance` and prints what it changed;
+`set graphics|metalfx|retina|optionalt|latinlayout` also runs `applyPerformance` and prints what it changed;
 `bottle create` prints it after wineboot.
 
 ### App
@@ -984,9 +988,9 @@ cross cache clear <bottle> [<exe name>]            without an exe: list the cach
   (`PerformanceBox` in BottleView.swift) with Sync (Automatic/ESync/MSync), DLSS via MetalFX
   ("Games that offer DLSS get MetalFX upscaling and frame generation"; disabled for
   wined3d), Advertise AVX, Ray tracing (Default/On/Off), FPS cap (empty = off), CPU cores
-  (since 2026-11-06), Fast x87 (32-bit) (since 2026-11-06), Metal HUD, Retina (High Resolution), and the note that settings apply to
+  (since 2026-11-06), Fast x87 (32-bit) (since 2026-11-06), Metal HUD, Retina (High Resolution), Option key is Alt and English keyboard in games (since 2026-11-21), and the note that settings apply to
   programs started afterwards.
-  Each change saves cross.json (`AppModel.setPerformance`); a metalfx/retina change, a switch
+  Each change saves cross.json (`AppModel.setPerformance`); a metalfx/retina/optionAlt/latinLayout change, a switch
   to D3DMetal and a new bottle's finished wineboot run `applyPerformance` in the background.
 - Programs box: a `…` menu per program with **Clear Shader Cache (size)…** (asks first; the
   item is disabled while D3DMetal has no cache for that exe). The cache list is refreshed

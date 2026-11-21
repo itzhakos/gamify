@@ -1,0 +1,13 @@
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+@@ -2776,6 +2776,10 @@
+     _features.shaderUniformBufferArrayDynamicIndexing = true;
+     _features.shaderStorageBufferArrayDynamicIndexing = true;
+     _features.shaderClipDistance = true;
++    // Advertised, not implemented (Metal has no cull distance; SPIRV-Cross writes
++    // it as a plain output, so nothing is culled). CrossOver does the same for
++    // DXVK; Vulkan games such as Wolfenstein II require it at vkCreateDevice.
++    _features.shaderCullDistance = true;
+     _features.shaderInt16 = true;
+     _features.multiDrawIndirect = true;
+     _features.inheritedQueries = true;

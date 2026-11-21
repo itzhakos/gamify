@@ -73,6 +73,17 @@ public struct PerformanceSettings: Codable, Equatable {
     /// HKCU\Software\Wine\Mac Driver\RetinaMode: native pixels instead of half the
     /// backing resolution scaled up by Core Animation.
     public var retina: Bool = false
+    /// HKCU\Software\Wine\Mac Driver\LeftOptionIsAlt + RightOptionIsAlt: the Option keys
+    /// are Windows' Alt (lean in Wolfenstein II, Alt+Enter). Wine's own default sends nothing
+    /// for Option and makes Command the Alt key; with this on, both are Alt.
+    public var optionAlt: Bool = true
+    /// HKCU\Software\Wine\Mac Driver\ASCIIKeyboardLayout (src/patches/winemac-ascii-keyboard-layout.patch):
+    /// when the selected macOS layout cannot type Latin letters (Hebrew, Russian, Arabic,
+    /// Greek...), Windows programs get the ASCII-capable layout next to it (ABC, U.S.).
+    /// Games that resolve bindings by key name lose every letter key otherwise (Wolfenstein II
+    /// dropped W/A/S/D/R and saved its bindings without them). AZERTY, QWERTZ and other
+    /// Latin layouts are kept. Typing in Hebrew etc. inside Windows programs needs it off.
+    public var latinLayout: Bool = true
     /// D3DM_VENDOR_ID override; nil: 0x10DE (NVIDIA) while `metalfx` is on, else D3DMetal's own.
     public var vendorID: UInt32?
 
@@ -92,6 +103,8 @@ public struct PerformanceSettings: Codable, Equatable {
         maxFPS = try c.decodeIfPresent(Int.self, forKey: .maxFPS)
         hud = try c.decodeIfPresent(Bool.self, forKey: .hud) ?? false
         retina = try c.decodeIfPresent(Bool.self, forKey: .retina) ?? false
+        optionAlt = try c.decodeIfPresent(Bool.self, forKey: .optionAlt) ?? true
+        latinLayout = try c.decodeIfPresent(Bool.self, forKey: .latinLayout) ?? true
         vendorID = try c.decodeIfPresent(UInt32.self, forKey: .vendorID)
     }
 
@@ -251,7 +264,8 @@ extension Runtime {
 
     /// Puts in place what the bottle's performance settings need beyond environment
     /// variables: with MetalFX on (D3DMetal bottles) the runtime's nvngx names,
-    /// nvngx.dll + nvapi64.dll in system32 and NGXCore\FullPath; and RetinaMode.
+    /// nvngx.dll + nvapi64.dll in system32 and NGXCore\FullPath; and the Mac Driver values
+    /// (RetinaMode, LeftOptionIsAlt/RightOptionIsAlt, ASCIIKeyboardLayout).
     /// Cheap when nothing is missing (file checks and a look at user.reg/system.reg), so
     /// it runs before every launch (`runExe`, `steam`), at create and on a settings
     /// change. Needs an initialised prefix (after wineboot); returns what it changed.
@@ -295,10 +309,17 @@ extension Runtime {
                 values.append(Store.RegistryValue(key: Runtime.ngxKey, name: "FullPath", data: Runtime.ngxPath))
             }
         }
-        let retina = Registry.value(in: bottle, key: Runtime.macDriverKey, name: "RetinaMode")
-        let retinaOn = retina.map(Registry.isTrue) ?? false
-        if force || retinaOn != perf.retina {
-            values.append(Store.RegistryValue(key: Runtime.macDriverKey, name: "RetinaMode", data: perf.retina ? "Y" : "N"))
+        // Mac Driver switches; a missing value is Wine's default (off for all of these).
+        let macDriverSwitches: [(name: String, on: Bool)] = [
+            ("RetinaMode", perf.retina),
+            ("LeftOptionIsAlt", perf.optionAlt), ("RightOptionIsAlt", perf.optionAlt),
+            ("ASCIIKeyboardLayout", perf.latinLayout),
+        ]
+        for s in macDriverSwitches {
+            let isOn = Registry.value(in: bottle, key: Runtime.macDriverKey, name: s.name).map(Registry.isTrue) ?? false
+            if force || isOn != s.on {
+                values.append(Store.RegistryValue(key: Runtime.macDriverKey, name: s.name, data: s.on ? "Y" : "N"))
+            }
         }
         if !values.isEmpty {
             try applyRegistry(values, in: bottle, base: base)

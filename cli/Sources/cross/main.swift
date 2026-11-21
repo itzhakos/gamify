@@ -32,6 +32,9 @@ cross - bottle manager and launcher for the winecx runtimes
                                                      Metal-paced: steadier frames, ~1 frame of lag)
   cross bottle set <name> hud on|off                 Metal performance HUD (MTL_HUD_ENABLED)
   cross bottle set <name> retina on|off              High Resolution (Retina) mode of the Mac driver
+  cross bottle set <name> optionalt on|off           Option keys are Alt in Windows programs (default on)
+  cross bottle set <name> latinlayout on|off         Windows programs get the ABC/U.S. layout while macOS has
+                                                     a non-Latin one (Hebrew, Russian...) selected (default on)
   cross bottle set <name> vendor <hex>|default       GPU vendor id D3DMetal reports (D3DM_VENDOR_ID)
   cross bottle set <name> debug on|off               debugging mode: more Wine output and the Metal HUD
                                                      on screen, its frame lines in each launch log
@@ -89,7 +92,7 @@ through every connected local drive (3 folder levels deep) or the given folders 
 folders and .sparsebundle images (looked into read-only); `add` lists one in the bottles folder.
 CROSS_BOTTLES=<folder> uses another bottles folder (downloads stay where they are).
 Performance settings (cross.json "performance") apply to programs started afterwards; change
-sync and retina only while nothing runs in the bottle. metalfx (D3DMetal bottles) sets
+sync, retina, optionalt and latinlayout only while nothing runs in the bottle. metalfx (D3DMetal bottles) sets
 D3DM_ENABLE_METALFX=1 and D3DM_VENDOR_ID=0x10DE, puts nvngx.dll + nvapi64.dll in system32 and
 sets HKLM\\Software\\NVIDIA Corporation\\Global\\NGXCore\\FullPath; games that offer DLSS then get
 MetalFX upscaling (and frame generation on macOS 26+ where the game's DLSS-G runs). Files and
@@ -330,6 +333,10 @@ func main() throws {
                 bottle.config.performance.hud = parseSwitch(value, key)
             case "retina":
                 bottle.config.performance.retina = parseSwitch(value, key)
+            case "optionalt":
+                bottle.config.performance.optionAlt = parseSwitch(value, key)
+            case "latinlayout":
+                bottle.config.performance.latinLayout = parseSwitch(value, key)
             case "vendor", "vendorid":
                 if value.lowercased() == "default" {
                     bottle.config.performance.vendorID = nil
@@ -337,7 +344,7 @@ func main() throws {
                     guard let id = PerformanceSettings.parseVendorID(value) else { fail("vendor must be a hex id like 0x10DE or default, not '\(value)'") }
                     bottle.config.performance.vendorID = id
                 }
-            default: fail("unknown setting '\(key)' (graphics, graphics32, graphics9, storage, location, sync, metalfx, avx, cpus, x87, raytracing, maxfps, hud, retina, vendor, debug)")
+            default: fail("unknown setting '\(key)' (graphics, graphics32, graphics9, storage, location, sync, metalfx, avx, cpus, x87, raytracing, maxfps, hud, retina, optionalt, latinlayout, vendor, debug)")
             }
             try bottle.saveConfig()
             let cpusKey = ["cpus", "cpu", "cores"].contains(key.lowercased())
@@ -354,8 +361,8 @@ func main() throws {
                     bottle.fallbackLines(in: project).forEach { print("\(name):\($0.dropFirst(1))") }
                 }
             }
-            // files and registry values (nvngx.dll, NGXCore, RetinaMode, winemetal.dll, cache/dxvk); env vars need nothing
-            if ["graphics", "graphics32", "graphics9", "metalfx", "dlss", "retina"].contains(key.lowercased()) {
+            // files and registry values (nvngx.dll, NGXCore, Mac Driver switches, winemetal.dll, cache/dxvk); env vars need nothing
+            if ["graphics", "graphics32", "graphics9", "metalfx", "dlss", "retina", "optionalt", "latinlayout"].contains(key.lowercased()) {
                 let runtime = try Runtime.forBottle(bottle, project: project)
                 for line in try runtime.applyPerformance(to: bottle, force: true) { print("\(name): \(line)") }
             }

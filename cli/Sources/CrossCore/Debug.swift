@@ -865,6 +865,8 @@ extension Bottle {
             ("maxfps", p.maxFPS.map(String.init) ?? "off", d3dmetal ? vars(["D3DM_MAX_FPS"]) : onlyD3DMetal),
             ("hud", onOff(p.hud), config.debug && !p.hud ? "MTL_HUD_ENABLED=1 while debugging mode is on" : vars(["MTL_HUD_ENABLED"])),
             ("retina", onOff(p.retina), "RetinaMode=\(p.retina ? "Y" : "N")"),
+            ("optionalt", onOff(p.optionAlt), "LeftOptionIsAlt/RightOptionIsAlt=\(p.optionAlt ? "Y" : "N")"),
+            ("latinlayout", onOff(p.latinLayout), "ASCIIKeyboardLayout=\(p.latinLayout ? "Y" : "N")"),
         ]
         lines.append(("vendor", p.vendorID.map(PerformanceSettings.hex) ?? "default",
                       d3dmetal ? (vars(["D3DM_VENDOR_ID"]).isEmpty ? "D3DMetal's own (0x1002)" : vars(["D3DM_VENDOR_ID"])) : onlyD3DMetal))

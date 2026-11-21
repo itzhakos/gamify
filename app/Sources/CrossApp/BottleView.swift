@@ -635,7 +635,14 @@ struct PerformanceBox: View {
                         .help(HelpText.perfRetina)
                     Spacer(minLength: 0)
                 }
-                Text("Applies to programs started afterwards; change Sync and Retina only while nothing runs in this bottle.")
+                HStack(spacing: 16) {
+                    Toggle("Option key is Alt", isOn: setting(\.optionAlt))
+                        .help(HelpText.perfOptionAlt)
+                    Toggle("English keyboard in games", isOn: setting(\.latinLayout))
+                        .help(HelpText.perfLatinLayout)
+                    Spacer(minLength: 0)
+                }
+                Text("Applies to programs started afterwards; change Sync, Retina and the keyboard switches only while nothing runs in this bottle.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .font(.callout)

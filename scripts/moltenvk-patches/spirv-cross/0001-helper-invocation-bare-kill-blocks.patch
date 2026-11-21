@@ -1,0 +1,27 @@
+diff --git a/spirv_msl.cpp b/spirv_msl.cpp
+index c5a9d433..ca6ca28a 100644
+--- a/spirv_msl.cpp
++++ b/spirv_msl.cpp
+@@ -2356,15 +2356,18 @@ void CompilerMSL::extract_global_variables_from_function(uint32_t func_id, std::
+ 				break;
+ 			}
+ 
+-			if (needs_manual_helper_invocation_updates() && b.terminator == SPIRBlock::Kill &&
+-			    needs_helper_invocation)
+-				added_arg_ids.insert(builtin_helper_invocation_id);
+-
+ 			// TODO: Add all other operations which can affect memory.
+ 			// We should consider a more unified system here to reduce boiler-plate.
+ 			// This kind of analysis is done in several places ...
+ 		}
+ 
++		// Checked per block, not per instruction: a block that holds nothing but
++		// OpKill (a bare discard) has no ops, and the discard expression still
++		// writes gl_HelperInvocation, so the function needs it as an argument.
++		if (needs_manual_helper_invocation_updates() && b.terminator == SPIRBlock::Kill &&
++		    needs_helper_invocation)
++			added_arg_ids.insert(builtin_helper_invocation_id);
++
+ 		if (b.terminator == SPIRBlock::EmitMeshTasks && builtin_task_grid_id != 0)
+ 			added_arg_ids.insert(builtin_task_grid_id);
+ 	}

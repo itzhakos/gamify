@@ -1,0 +1,148 @@
+winemac-ascii-keyboard-layout.patch - Gamify patch over CrossOver 25.1.0 Wine (dlls/winemac.drv), LGPL-2.1-or-later.
+Found with Wolfenstein II: The New Colossus (Steam 612880, idTech 6.5) on a Mac with the Hebrew layout
+selected. The game resolves its key bindings by key name through the active layout; on Hebrew no key
+types "w", so `bind "W" "_moveforward"` (and A, S, D, R) were dropped and the game saved its bindings
+without them; its prompts showed "*" for every letter key. DirectInput still got the right scan codes.
+ Mac Driver option ASCIIKeyboardLayout ("y"/"n", off by default; Gamify's `latinLayout` setting turns
+ it on): while the selected keyboard layout is not ASCII-capable (kTISPropertyInputSourceIsASCIICapable:
+ Hebrew, Russian, Greek, Arabic...), Windows programs get TISCopyCurrentASCIICapableKeyboardLayoutInputSource()
+ (ABC, U.S. ...) for key mapping, ToUnicode and the HKL; ASCII-capable layouts (AZERTY, QWERTZ...) are
+ kept. An HKL that the input source list does not know (that layout not enabled) falls back to 0x04090409.
+ Typing non-Latin text inside Windows programs needs the option off.
+Apply: patch -p1 -d upstream/crossover-sources-25.1.0/sources/wine < src/patches/winemac-ascii-keyboard-layout.patch
+
+--- a/dlls/winemac.drv/macdrv_cocoa.h
++++ b/dlls/winemac.drv/macdrv_cocoa.h
+@@ -167,6 +167,7 @@
+ extern int right_option_is_alt;
+ extern int left_command_is_ctrl;
+ extern int right_command_is_ctrl;
++extern int ascii_keyboard_layout;
+ extern int allow_immovable_windows;
+ extern int use_confinement_cursor_clipping;
+ extern int cursor_clipping_locks_windows;
+--- a/dlls/winemac.drv/macdrv_main.c
++++ b/dlls/winemac.drv/macdrv_main.c
+@@ -53,6 +53,7 @@
+ int right_option_is_alt = 0;
+ int left_command_is_ctrl = 0;
+ int right_command_is_ctrl = 0;
++int ascii_keyboard_layout = 0;
+ BOOL allow_software_rendering = FALSE;
+ int allow_immovable_windows = TRUE;
+ int use_confinement_cursor_clipping = TRUE;
+@@ -374,6 +375,10 @@
+         left_command_is_ctrl = IS_OPTION_TRUE(buffer[0]);
+     if (!get_config_key(hkey, appkey, "RightCommandIsCtrl", buffer, sizeof(buffer)))
+         right_command_is_ctrl = IS_OPTION_TRUE(buffer[0]);
++
++    /* Gamify: Windows programs get an ASCII-capable layout when the selected one is not. */
++    if (!get_config_key(hkey, appkey, "ASCIIKeyboardLayout", buffer, sizeof(buffer)))
++        ascii_keyboard_layout = IS_OPTION_TRUE(buffer[0]);
+ 
+     if (left_command_is_ctrl && right_command_is_ctrl && !left_option_is_alt && !right_option_is_alt)
+         WARN("Both Command keys have been mapped to Control. There is no way to "
+@@ -579,6 +584,7 @@
+ 
+     macdrv_get_input_source_info(&data->keyboard_layout_uchr, &data->keyboard_type, &data->iso_keyboard, &input_source);
+     data->active_keyboard_layout = macdrv_get_hkl_from_source(input_source);
++    if (!data->active_keyboard_layout) data->active_keyboard_layout = (HKL)(ULONG_PTR)0x04090409; /* Gamify */
+     CFRelease(input_source);
+     macdrv_compute_keyboard_layout(data);
+ 
+--- a/dlls/winemac.drv/cocoa_app.m
++++ b/dlls/winemac.drv/cocoa_app.m
+@@ -562,10 +562,39 @@
+         if (!source1 || !source2)
+             return FALSE;
+         return CFEqual(source1, source2);
++    }
++
++    /* Gamify: with the Mac Driver option ASCIIKeyboardLayout, Windows programs get the
++       ASCII-capable layout macOS keeps next to the selected input source (ABC, U.S., ...)
++       whenever the selected layout cannot type Latin letters (Hebrew, Russian, Greek,
++       Arabic, ...). Games that resolve key bindings through the layout ("W" -> the key that
++       types "w", Wolfenstein II) otherwise lose every letter binding; AZERTY, QWERTZ and
++       other ASCII-capable layouts are kept as they are. *substituted says which one. */
++    static TISInputSourceRef copy_keyboard_layout_input_source(BOOL *substituted)
++    {
++        TISInputSourceRef layout = TISCopyCurrentKeyboardLayoutInputSource();
++
++        if (substituted) *substituted = FALSE;
++        if (ascii_keyboard_layout && layout)
++        {
++            CFBooleanRef ascii = TISGetInputSourceProperty(layout, kTISPropertyInputSourceIsASCIICapable);
++            if (!ascii || !CFBooleanGetValue(ascii))
++            {
++                TISInputSourceRef ascii_layout = TISCopyCurrentASCIICapableKeyboardLayoutInputSource();
++                if (ascii_layout)
++                {
++                    CFRelease(layout);
++                    layout = ascii_layout;
++                    if (substituted) *substituted = TRUE;
++                }
++            }
++        }
++        return layout;
+     }
+ 
+     - (void) keyboardSelectionDidChange:(BOOL)force
+     {
++        BOOL substituted;
+         TISInputSourceRef inputSource, inputSourceLayout;
+ 
+         if (!force)
+@@ -576,7 +605,7 @@
+         }
+ 
+         inputSource = TISCopyCurrentKeyboardInputSource();
+-        inputSourceLayout = TISCopyCurrentKeyboardLayoutInputSource();
++        inputSourceLayout = copy_keyboard_layout_input_source(&substituted);
+         if (!force && EqualInputSource(inputSource, lastKeyboardInputSource) &&
+             EqualInputSource(inputSourceLayout, lastKeyboardLayoutInputSource))
+         {
+@@ -606,7 +635,8 @@
+                 event->keyboard_changed.keyboard_type = self.keyboardType;
+                 event->keyboard_changed.iso_keyboard = (KBGetLayoutType(self.keyboardType) == kKeyboardISO);
+                 event->keyboard_changed.uchr = CFDataCreateCopy(NULL, uchr);
+-                event->keyboard_changed.input_source = (TISInputSourceRef)CFRetain(inputSource);
++                /* The substituted layout also stands in for the input source (its HKL). */
++                event->keyboard_changed.input_source = (TISInputSourceRef)CFRetain(substituted ? inputSourceLayout : inputSource);
+ 
+                 if (event->keyboard_changed.uchr)
+                 {
+@@ -2727,19 +2757,21 @@
+ {
+     OnMainThread(^{
+         TISInputSourceRef inputSourceLayout;
++        BOOL substituted;
+ 
+-        inputSourceLayout = TISCopyCurrentKeyboardLayoutInputSource();
++        inputSourceLayout = copy_keyboard_layout_input_source(&substituted);
+         if (inputSourceLayout)
+         {
+             CFDataRef data = TISGetInputSourceProperty(inputSourceLayout,
+                                 kTISPropertyUnicodeKeyLayoutData);
+             *uchr = CFDataCreateCopy(NULL, data);
+-            CFRelease(inputSourceLayout);
+ 
+             *keyboard_type = [WineApplicationController sharedController].keyboardType;
+             *is_iso = (KBGetLayoutType(*keyboard_type) == kKeyboardISO);
+             if (input_source)
+-                *input_source = TISCopyCurrentKeyboardInputSource();
++                *input_source = substituted ? (TISInputSourceRef)CFRetain(inputSourceLayout)
++                                            : TISCopyCurrentKeyboardInputSource();
++            CFRelease(inputSourceLayout);
+         }
+     });
+ }
+--- a/dlls/winemac.drv/keyboard.c
++++ b/dlls/winemac.drv/keyboard.c
+@@ -1158,6 +1158,7 @@
+     thread_data->keyboard_type = event->keyboard_changed.keyboard_type;
+     thread_data->iso_keyboard = event->keyboard_changed.iso_keyboard;
+     thread_data->active_keyboard_layout = macdrv_get_hkl_from_source(event->keyboard_changed.input_source);
++    if (!thread_data->active_keyboard_layout) thread_data->active_keyboard_layout = (HKL)(ULONG_PTR)0x04090409; /* Gamify */
+     thread_data->dead_key_state = 0;
+ 
+     macdrv_compute_keyboard_layout(thread_data);

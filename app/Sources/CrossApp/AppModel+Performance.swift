@@ -4,7 +4,7 @@ import Foundation
 /// The Performance box on the bottle page and Clear Shader Cache… in the Programs box.
 extension AppModel {
     /// Saves the bottle's performance settings to cross.json; they apply to programs
-    /// started afterwards. MetalFX and Retina also need files and registry values in the
+    /// started afterwards. MetalFX, Retina and the keyboard switches also need files and registry values in the
     /// bottle, put in place off the main thread (`Runtime.applyPerformance`).
     func setPerformance(_ performance: PerformanceSettings, for name: String) {
         guard var bottle = bottle(named: name), bottle.config.performance != performance else { return }
@@ -17,7 +17,8 @@ extension AppModel {
             return
         }
         reloadBottles()
-        if old.metalfx != performance.metalfx || old.retina != performance.retina {
+        if old.metalfx != performance.metalfx || old.retina != performance.retina
+            || old.optionAlt != performance.optionAlt || old.latinLayout != performance.latinLayout {
             applyPerformance(to: bottle)
         }
     }

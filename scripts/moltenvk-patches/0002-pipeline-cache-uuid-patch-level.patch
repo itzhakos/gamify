@@ -1,0 +1,16 @@
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+@@ -3282,6 +3282,13 @@
+ 	mtlFeatures |= _isUsingMetalArgumentBuffers << 0;
+ 	*(uint32_t*)&_properties.pipelineCacheUUID[uuidComponentOffset] = NSSwapHostIntToBig(mtlFeatures);
+ 	uuidComponentOffset += sizeof(mtlFeatures);
++
++	// Last 4 bytes: Cross patch level ('CR' + n). Bump it whenever a patch in
++	// scripts/moltenvk-patches changes the generated MSL, so pipeline caches that
++	// games saved with an older build (same MVK_VERSION) are thrown away.
++	uint32_t crossPatchLevel = 0x43520001;
++	*(uint32_t*)&_properties.pipelineCacheUUID[uuidComponentOffset] = NSSwapHostIntToBig(crossPatchLevel);
++	uuidComponentOffset += sizeof(crossPatchLevel);
+ }
+ 
+ // Combine OS major (8 bits), OS minor (8 bits), Mac GPU family (8 bits), and

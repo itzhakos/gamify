@@ -2,6 +2,44 @@
 
 ## Current state (2026-10-19)
 What is live, in one place; everything below it is the chronological log (dead ends included).
+- **Wolfenstein II (Vulkan only) plays: three MoltenVK patches, a SPIRV-Cross patch, a winemac patch
+  and two keyboard settings; not released** (2026-11-21, main, uncommitted). Tested on the Studio in
+  the user's bottle `Steam` (Steam, the game's own saves) on the repo runtime, which now holds the
+  patched libMoltenVK.dylib + winemac.so (originals in the session scratchpad); Steam was left running
+  on it (`CROSS_ROOT=<repo>`, `WINENCPU=16`). Ship = rebuild winecx-full (both build scripts carry
+  the patches now) + release.
+  (1) **vkCreateDevice**: the user's 0.14 launch quit with `vkCreateDevice failed with error
+  (VK_ERROR_FEATURE_NOT_PRESENT)`. MoltenVK's `[mvk-error]` named "the 39th flag in
+  VkPhysicalDeviceFeatures" (counted from 1) = `shaderCullDistance`, which stock MoltenVK 1.4.2 does not
+  advertise and CrossOver's MoltenVK does (for DXVK). Past that: 4 fragment shaders with `undeclared
+  identifier 'gl_HelperInvocation'` (SPIRV-Cross checks for `OpKill` once per instruction, so a block
+  holding only OpKill never passes the variable to its helper function; same in upstream main) and
+  6 pipelines with "Vertex attribute m_21(0) is missing from the vertex descriptor" (idTech builds
+  pipelines with an empty vertex input state whose shaders read locations 0/1/2/3/9/12).
+  `scripts/moltenvk-patches/` (README): 0001 shaderCullDistance, 0002 patch level in pipelineCacheUUID,
+  0003 undescribed vertex inputs fed from a used vertex buffer or a 16-byte zero buffer at binding 0's
+  slot (now always reserved), spirv-cross/0001 one check per block. build-winecx-full-deps.sh fetches
+  with `--none`, patches SPIRV-Cross, then builds (fetchDependencies' `checkout --force` would wipe
+  it). Result: 0 `[mvk-error]` (was 14), menu + gameplay at 3440x1440, in-engine scenes correct.
+  (2) **Controller**: a DualShock 4 is raw HID in Wine (winebus `prefer_hidraw` for Sony pads, no
+  `IG_`), so an XInput-only game sees it only through Steam Input, i.e. when Steam launches it; a
+  direct `cross run` has no controller. Launched from Steam: GameOverlayRenderer64.dll + xinput1_3 in
+  the game, the game shows controller prompts (its Steam Input was already forced on, "2").
+  (3) **Keyboard**: every key reaches DirectInput with the right DIK (keytest tool, all 99 keys), but
+  the game resolves bindings by key name through the active layout. With macOS on Hebrew no key types
+  "w", so W/A/S/D/R were never bound, the game saved its bindings that way (Config.cfg 14:49, and its
+  profile: moving Config.cfg aside did not bring them back) and showed "*" for letter keys. Fix:
+  src/patches/winemac-ascii-keyboard-layout.patch, Mac Driver option `ASCIIKeyboardLayout`: Windows
+  programs get the ASCII-capable layout (ABC) while the selected one is not; new per-bottle setting
+  `latinLayout` (default on; CLI `latinlayout`, app "English keyboard in games"). The user's bindings
+  were restored with the game's own Defaults (old file kept as `...Config.cfg.hebrew-layout-broken`
+  in the save folder). Verified with macOS on Hebrew: prompts read [R]/[F], W and A move.
+  (4) **Option = Alt**: Wine sends nothing for Option by default and makes Command Alt; new setting
+  `optionAlt` (default on) writes LeftOptionIsAlt/RightOptionIsAlt; Option went out as VK_LMENU /
+  DIK 0x38 (the game's lean). Both settings: Performance.swift registry step, Debug export, docs/app.md.
+  Side effects of the test: a key sweep hit F5/F9 (quicksave overwritten at the same spot). The bottle
+  still has `cpus = 3` (Ori), bottle-wide; Wolfenstein II wants all cores, per-program settings do not
+  exist yet.
 - **Game Mode now turns on for Wine games (frontmost + full screen); no change in Ori's late frames
   on the Studio** (2026-11-06 night, side session, branch `claude/reverent-chatelet-ce4078`,
   released in 0.14, full DMG): macOS labels a game only from a bundle's Info.plist (probes with a

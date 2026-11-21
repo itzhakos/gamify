@@ -232,6 +232,16 @@ enum HelpText {
         so lower frame rates. Off scales a half-resolution image up, which is what most games \
         want. Change it only while nothing runs in this bottle.
         """
+    static let perfOptionAlt = """
+        The Option keys act as Windows' Alt key: lean in shooters, Alt+Enter, Alt-bound \
+        actions. Off: Option sends nothing to Windows programs and only Command is Alt.
+        """
+    static let perfLatinLayout = """
+        While your Mac types in a non-Latin layout (Hebrew, Russian, Arabic...), Windows \
+        programs get your English layout (ABC or U.S.) instead. Games then find W, A, S, D \
+        and the other letter keys. French, German and other Latin layouts stay as they are. \
+        Turn it off to type Hebrew or Russian inside Windows programs.
+        """
 
     // MARK: - BottleView: StorageSizeField
 

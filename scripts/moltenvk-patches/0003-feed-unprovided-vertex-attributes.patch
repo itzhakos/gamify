@@ -1,0 +1,183 @@
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+@@ -942,6 +942,9 @@
+ 	 * create a no-op BLIT encoder based on filling this single-byte buffer.
+ 	 */
+ 	id<MTLBuffer> getDummyBlitMTLBuffer();
++
++	/** A small zero-filled buffer that feeds vertex attributes the pipeline does not describe (see MVKGraphicsPipeline::addUnprovidedVertexAttributes()). */
++	id<MTLBuffer> getPlaceholderVertexMTLBuffer();
+ 
+ 	/**
+ 	 * Returns whether MTLCommandBuffers can be prefilled.
+@@ -1111,6 +1114,7 @@
+ 	std::string _capturePipeFileName;
+ 	id<MTLSamplerState> _defaultMTLSamplerState = nil;
+ 	id<MTLBuffer> _dummyBlitMTLBuffer = nil;
++	id<MTLBuffer> _placeholderVertexMTLBuffer = nil;
+ #if MVK_XCODE_16
+ 	id<MTLResidencySet> _residencySet = nil;
+ #endif
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+@@ -4932,6 +4932,19 @@
+ 		}
+ 	}
+ 	return _dummyBlitMTLBuffer;
++}
++
++id<MTLBuffer> MVKDevice::getPlaceholderVertexMTLBuffer() {
++	if ( !_placeholderVertexMTLBuffer ) {
++		lock_guard<mutex> lock(_rezLock);
++		if ( !_placeholderVertexMTLBuffer ) {
++			@autoreleasepool {
++				static const uint8_t zeros[16] = {};
++				_placeholderVertexMTLBuffer = [_physicalDevice->_mtlDevice newBufferWithBytes: zeros length: sizeof(zeros) options: MTLResourceStorageModeShared];
++			}
++		}
++	}
++	return _placeholderVertexMTLBuffer;
+ }
+ 
+ MTLCompileOptions* MVKDevice::getMTLCompileOptions(uint32_t fpFastMathFlags,
+@@ -5568,6 +5581,7 @@
+ #endif
+ 	[_defaultMTLSamplerState release];
+ 	[_dummyBlitMTLBuffer release];
++	[_placeholderVertexMTLBuffer release];
+ 
+ 	stopAutoGPUCapture(MVK_CONFIG_AUTO_GPU_CAPTURE_SCOPE_DEVICE);
+ 
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.h
+@@ -316,6 +316,9 @@
+ 	const MVKStaticBitSet<kMVKMaxBufferCount>& getVkVertexBuffers() const { return _vkVertexBuffers; }
+ 	/** Returns a list of the vertex buffers used by this pipeline by Metal buffer ID */
+ 	const MVKStaticBitSet<kMVKMaxBufferCount>& getMtlVertexBuffers() const { return _mtlVertexBuffers; }
++
++	/** Metal vertex buffer index that must get the device's placeholder vertex buffer, or -1. */
++	int32_t getPlaceholderVertexBufferIndex() const { return _placeholderVertexBufferIndex; }
+ 	const VkViewport* getViewports() const { return _viewports; }
+ 	const VkRect2D* getScissors() const { return _scissors; }
+ 	const MTLSamplePosition* getSampleLocations() const { return _sampleLocations; }
+@@ -356,6 +359,7 @@
+     bool addFragmentShaderToPipeline(MTLRenderPipelineDescriptor* plDesc, const VkGraphicsPipelineCreateInfo* pCreateInfo, mvk::SPIRVToMSLConversionConfiguration& shaderConfig, SPIRVShaderOutputs& prevOutput, const VkPipelineShaderStageCreateInfo* pFragmentSS, VkPipelineCreationFeedback* pFragmentFB);
+ 	template<class T>
+ 	bool addVertexInputToPipeline(T* inputDesc, const VkPipelineVertexInputStateCreateInfo* pVI, const mvk::SPIRVToMSLConversionConfiguration& shaderConfig);
++	void addUnprovidedVertexAttributes(MTLRenderPipelineDescriptor* plDesc);
+ 	void adjustVertexInputForMultiview(MTLVertexDescriptor* inputDesc, const VkPipelineVertexInputStateCreateInfo* pVI, uint32_t viewCount, uint32_t oldViewCount = 1);
+     void addTessellationToPipeline(MTLRenderPipelineDescriptor* plDesc, const mvk::SPIRVTessReflectionData& reflectData, const VkPipelineTessellationStateCreateInfo* pTS);
+     void addFragmentOutputToPipeline(MTLRenderPipelineDescriptor* plDesc, const VkGraphicsPipelineCreateInfo* pCreateInfo);
+@@ -386,6 +390,7 @@
+ 	std::unordered_map<uint32_t, id<MTLRenderPipelineState>> _multiviewMTLPipelineStates;
+ 	MVKStaticBitSet<kMVKMaxBufferCount> _vkVertexBuffers;
+ 	MVKStaticBitSet<kMVKMaxBufferCount> _mtlVertexBuffers;
++	int32_t _placeholderVertexBufferIndex = -1;
+ 	MVKPipelineStageResourceInfo _stageResources[kMVKShaderStageFragment + 1] = {};
+ 
+ 	id<MTLComputePipelineState> _mtlTessVertexStageState = nil;
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm
+@@ -1191,6 +1191,7 @@
+ 	// Vertex input
+ 	// This needs to happen before compiling the fragment shader, or we'll lose information on vertex attributes.
+ 	if (!addVertexInputToPipeline(plDesc.vertexDescriptor, pCreateInfo->pVertexInputState, shaderConfig)) { return nil; }
++	addUnprovidedVertexAttributes(plDesc);
+ 
+ 	// Fragment shader - only add if rasterization is enabled
+ 	if (!addFragmentShaderToPipeline(plDesc, pCreateInfo, shaderConfig, vtxOutputs, pFragmentSS, pFragmentFB)) { return nil; }
+@@ -1703,7 +1704,67 @@
+ 	}
+ 	return verifyImplicitBuffers(kMVKShaderStageFragment);
+ }
++
++// A vertex shader may read an input location that VkPipelineVertexInputStateCreateInfo
++// does not describe. Vulkan drivers build such a pipeline and the input reads an undefined
++// value; Metal refuses it ("Vertex attribute ... is missing from the vertex descriptor").
++// Wolfenstein II does this, also in pipelines without any vertex buffer. Feed each such
++// active attribute from a vertex buffer the pipeline already uses, or else from a small
++// zero buffer, at offset 0, with a 1-byte format of the attribute's class (always within
++// the stride; Metal fills the missing components with 0, 0, 1).
++void MVKGraphicsPipeline::addUnprovidedVertexAttributes(MTLRenderPipelineDescriptor* plDesc) {
++	id<MTLFunction> vtxFunc = plDesc.vertexFunction;
++	MTLVertexDescriptor* vtxDesc = plDesc.vertexDescriptor;
++	if ( !vtxFunc || !vtxDesc ) { return; }
++
++	NSInteger srcBuffIdx = -1;
++	for (NSUInteger loc = 0; loc < 31; loc++) {
++		if (vtxDesc.attributes[loc].format != MTLVertexFormatInvalid) {
++			srcBuffIdx = vtxDesc.attributes[loc].bufferIndex;
++			break;
++		}
++	}
+ 
++	for (MTLVertexAttribute* attr in vtxFunc.vertexAttributes) {
++		if ( !attr.isActive ) { continue; }
++		NSUInteger loc = attr.attributeIndex;
++		if (vtxDesc.attributes[loc].format != MTLVertexFormatInvalid) { continue; }
++		if (srcBuffIdx < 0) {
++			// No vertex buffer in this pipeline: binding 0's slot is reserved and unused
++			// (initReservedVertexAttributeBufferCount()), so the device's placeholder
++			// buffer is bound there at draw time, read at offset 0 for every vertex.
++			srcBuffIdx = getMetalBufferIndexForVertexAttributeBinding(0);
++			vtxDesc.layouts[srcBuffIdx].stride = 4;
++			vtxDesc.layouts[srcBuffIdx].stepFunction = MTLVertexStepFunctionConstant;
++			vtxDesc.layouts[srcBuffIdx].stepRate = 0;
++			_placeholderVertexBufferIndex = (int32_t)srcBuffIdx;
++			_mtlVertexBuffers.set(srcBuffIdx);
++		}
++		MTLVertexFormat fmt;
++		switch (attr.attributeType) {
++			case MTLDataTypeInt: case MTLDataTypeInt2: case MTLDataTypeInt3: case MTLDataTypeInt4:
++			case MTLDataTypeShort: case MTLDataTypeShort2: case MTLDataTypeShort3: case MTLDataTypeShort4:
++			case MTLDataTypeChar: case MTLDataTypeChar2: case MTLDataTypeChar3: case MTLDataTypeChar4:
++				fmt = MTLVertexFormatChar;
++				break;
++			case MTLDataTypeUInt: case MTLDataTypeUInt2: case MTLDataTypeUInt3: case MTLDataTypeUInt4:
++			case MTLDataTypeUShort: case MTLDataTypeUShort2: case MTLDataTypeUShort3: case MTLDataTypeUShort4:
++			case MTLDataTypeUChar: case MTLDataTypeUChar2: case MTLDataTypeUChar3: case MTLDataTypeUChar4:
++			case MTLDataTypeBool: case MTLDataTypeBool2: case MTLDataTypeBool3: case MTLDataTypeBool4:
++				fmt = MTLVertexFormatUChar;
++				break;
++			default:
++				fmt = MTLVertexFormatUCharNormalized;
++				break;
++		}
++		vtxDesc.attributes[loc].format = fmt;
++		vtxDesc.attributes[loc].bufferIndex = srcBuffIdx;
++		vtxDesc.attributes[loc].offset = 0;
++		reportWarning(VK_SUCCESS, "Vertex shader reads attribute %s at location %lu, which the pipeline does not describe. Feeding it a placeholder from vertex buffer %ld.",
++					  attr.name.UTF8String, (unsigned long)loc, (long)srcBuffIdx);
++	}
++}
++
+ template<class T>
+ bool MVKGraphicsPipeline::addVertexInputToPipeline(T* inputDesc,
+ 												   const VkPipelineVertexInputStateCreateInfo* pVI,
+@@ -2190,7 +2251,9 @@
+ 	// The number of reserved bindings we need for the vertex stage is determined from the largest vertex
+ 	// attribute binding number, plus any synthetic buffer bindings created to support translated offsets.
+ 	mvkClear<uint32_t>(_reservedVertexAttributeBufferCount.stages, kMVKShaderStageCount);
+-	_reservedVertexAttributeBufferCount.stages[kMVKShaderStageVertex] = (maxBinding + 1) + xltdBuffCnt;
++	// At least one slot (binding 0's) even without vertex buffers: a vertex shader may read inputs the
++	// pipeline does not describe, and addUnprovidedVertexAttributes() then feeds them from that slot.
++	_reservedVertexAttributeBufferCount.stages[kMVKShaderStageVertex] = max<int32_t>(maxBinding + 1, 1) + xltdBuffCnt;
+ 	_reservedVertexAttributeBufferCount.stages[kMVKShaderStageTessCtl] = kMVKTessCtlNumReservedBuffers;
+ 	_reservedVertexAttributeBufferCount.stages[kMVKShaderStageTessEval] = kMVKTessEvalNumReservedBuffers;
+ }
+--- a/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCommandEncoderState.mm
+@@ -810,6 +810,13 @@
+ 		bindVertexBuffer<DynamicStride>(encoder, buffer.mtlBuffer, buffer.offset + xltdBuffer.translationOffset, buffer.stride,
+ 		                                idx, exists, bindings, binder);
+ 	}
++	// Vertex inputs the pipeline does not describe, in a pipeline without vertex buffers
++	// (MVKGraphicsPipeline::addUnprovidedVertexAttributes()). Its layout has a static stride.
++	int32_t placeholderIdx = pipeline->getPlaceholderVertexBufferIndex();
++	if (placeholderIdx >= 0) {
++		bindVertexBuffer<false>(encoder, pipeline->getDevice()->getPlaceholderVertexMTLBuffer(), 0, 0,
++		                        static_cast<NSUInteger>(placeholderIdx), exists, bindings, binder);
++	}
+ }
+ 
+ static void bindVertexBuffers(id<MTLCommandEncoder> encoder,

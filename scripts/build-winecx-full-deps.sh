@@ -333,13 +333,27 @@ if [ ! -f "$PREFIX/lib/libMoltenVK.dylib" ]; then
   step moltenvk "($MVK_SRC)"
   MVK="$BUILD/moltenvk"
   [ -d "$MVK" ] || cp -R "$MVK_SRC" "$MVK"    # fetchDependencies writes into External/
+  # Our patches (scripts/moltenvk-patches, see its README): MoltenVK's in the
+  # source tree now, SPIRV-Cross's after fetchDependencies has cloned it.
+  # fetchDependencies re-checks out every repo with `git checkout --force <rev>`,
+  # which would wipe the SPIRV-Cross patch, so it fetches first (--none), the
+  # patch goes in, and the second run (plain checkout, a no-op at <rev>) builds.
+  mvk_patch() {  # <dir> <patch>: apply unless already applied
+    patch -d "$1" -p1 -R --dry-run -s -f < "$2" > /dev/null 2>&1 || patch -d "$1" -p1 -s -f < "$2"
+  }
+  for p in "$ROOT"/scripts/moltenvk-patches/*.patch; do mvk_patch "$MVK" "$p"; done
+  sed -i '' 's/git checkout --force \$3/git checkout $3/' "$MVK/fetchDependencies"
   # Xcode 27 only accepts macOS deployment targets >= 12.0 (1.4.2 already says
   # 12.0; older MoltenVK said 10.15). Project settings beat environment variables.
   { grep -rl "MACOSX_DEPLOYMENT_TARGET = 10.15" --include=project.pbxproj "$MVK" || true; } \
     | while read -r f; do sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.15;/MACOSX_DEPLOYMENT_TARGET = 12.0;/' "$f"; done
   cd "$MVK"
   env -u CC -u CXX -u CFLAGS -u CPPFLAGS -u LDFLAGS -u PKG_CONFIG_LIBDIR \
-    ./fetchDependencies --macos > "$BUILD/moltenvk.fetch.log" 2>&1 \
+    ./fetchDependencies --none > "$BUILD/moltenvk.fetch.log" 2>&1 \
+    || { tail -30 "$BUILD/moltenvk.fetch.log"; exit 1; }
+  for p in "$ROOT"/scripts/moltenvk-patches/spirv-cross/*.patch; do mvk_patch "$MVK/External/SPIRV-Cross" "$p"; done
+  env -u CC -u CXX -u CFLAGS -u CPPFLAGS -u LDFLAGS -u PKG_CONFIG_LIBDIR \
+    ./fetchDependencies --macos >> "$BUILD/moltenvk.fetch.log" 2>&1 \
     || { tail -30 "$BUILD/moltenvk.fetch.log"; exit 1; }
   env -u CC -u CXX -u CFLAGS -u CPPFLAGS -u LDFLAGS -u PKG_CONFIG_LIBDIR \
     make macos > "$BUILD/moltenvk.make.log" 2>&1 || { tail -40 "$BUILD/moltenvk.make.log"; exit 1; }
